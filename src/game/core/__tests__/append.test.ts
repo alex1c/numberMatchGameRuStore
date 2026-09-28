@@ -59,11 +59,17 @@ describe('appendRemainingNumbers', () => {
 	})
 
 	it('recomputes available moves after append', () => {
+		// No legal pairs initially; after append the three vertical twins open.
 		const board = boardFromFixture('1 2 3', 3)
 		expect(getAvailableMoves(board)).toEqual([])
+
 		const next = appendRemainingNumbers(board)
-		// Tail duplicates 1,2,3 — new linear/value opportunities may appear
-		expect(getAvailableMoves(next).length).toBeGreaterThanOrEqual(0)
 		expect(validateBoard(next).ok).toBe(true)
+		expect(getActiveValues(next)).toEqual([1, 2, 3, 1, 2, 3])
+		expect(getAvailableMoves(next)).toEqual([
+			{ aIndex: 0, bIndex: 3 },
+			{ aIndex: 1, bIndex: 4 },
+			{ aIndex: 2, bIndex: 5 },
+		])
 	})
 })
