@@ -52,3 +52,6 @@ release-artifacts/
 *.apk
 gradle-error.txt
 tmp/
+
+# generator audit dumps (compact docs live under docs/)
+artifacts/

@@ -22,6 +22,7 @@ npm test
 npm run typecheck
 npm run lint
 npm run solver:bench
+npm run generator:audit -- --small
 npm start
 ```
 
@@ -38,11 +39,12 @@ Standard Metro: port **8081** (`--host lan`). Do not work around with 8082.
 - **PHASE 0** — project bootstrap (Expo 57 / RN / React 19, safe-area, theme, navigation, BannerSlot geometry, Android QA helpers)
 - **PHASE 1** — pure TypeScript Number Match game core + Jest coverage
 - **PHASE 2** — deterministic solver + replay + benchmark harness
+- **PHASE 3** — seeded generator + provisional difficulty profiles + 1000-puzzle audit
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/CORE_RULES.md](docs/CORE_RULES.md), and [docs/SOLVER.md](docs/SOLVER.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/CORE_RULES.md](docs/CORE_RULES.md), [docs/SOLVER.md](docs/SOLVER.md), [docs/GENERATOR.md](docs/GENERATOR.md).
 
 ## Intentionally not implemented yet
 
-Generator, campaign, polished gameplay UI, persistence I/O, Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
+Campaign catalog, polished gameplay UI, persistence I/O, Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
 
-**Next checkpoint:** PHASE 3 — Generator + difficulty analysis
+**Next checkpoint:** PHASE 4 — Gameplay UI
