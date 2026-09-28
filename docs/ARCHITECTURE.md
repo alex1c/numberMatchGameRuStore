@@ -9,6 +9,7 @@ Scheme: `number-match`
 | Area | Role |
 | --- | --- |
 | `src/game/core` | Pure TypeScript Number Match domain. No React Native. |
+| `src/game/solver` | Deterministic bounded DFS solver + replay (PHASE 2). |
 | `src/navigation`, `src/screens`, `src/components` | Minimal UI shell (not Expo Router). |
 | `src/theme` | Light/dark foundation. |
 | `src/storage` | Persistence **boundary/interface** only — no I/O yet. |
@@ -34,4 +35,6 @@ Reserved on Home / Levels / Daily / Statistics / Achievements / Settings / About
 
 ## Out of scope (later phases)
 
-Solver, generator, campaign, polished UI, persistence I/O, AppMetrica, production ads, rewarded, RuStore signing.
+Generator, campaign, polished UI, persistence I/O, AppMetrica, production ads, rewarded, RuStore signing.
+
+Solver details: [SOLVER.md](SOLVER.md).

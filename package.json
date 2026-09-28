@@ -12,6 +12,7 @@
     "lint": "eslint . --max-warnings 0",
     "test": "jest",
     "test:watch": "jest --watch",
+    "solver:bench": "tsx src/game/solver/bench.ts",
     "android:qa": "powershell -ExecutionPolicy Bypass -File ./scripts/android/android-device-qa.ps1"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "eslint-config-expo": "~57.0.2",
     "jest": "~29.7.0",
     "jest-expo": "~57.0.5",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   }
 }

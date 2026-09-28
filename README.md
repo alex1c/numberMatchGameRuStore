@@ -21,6 +21,7 @@ Android / RuStore ForestMusic project.
 npm test
 npm run typecheck
 npm run lint
+npm run solver:bench
 npm start
 ```
 
@@ -36,11 +37,12 @@ Standard Metro: port **8081** (`--host lan`). Do not work around with 8082.
 
 - **PHASE 0** — project bootstrap (Expo 57 / RN / React 19, safe-area, theme, navigation, BannerSlot geometry, Android QA helpers)
 - **PHASE 1** — pure TypeScript Number Match game core + Jest coverage
+- **PHASE 2** — deterministic solver + replay + benchmark harness
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CORE_RULES.md](docs/CORE_RULES.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/CORE_RULES.md](docs/CORE_RULES.md), and [docs/SOLVER.md](docs/SOLVER.md).
 
 ## Intentionally not implemented yet
 
-Solver, generator, campaign, polished gameplay UI, persistence I/O, Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
+Generator, campaign, polished gameplay UI, persistence I/O, Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
 
-**Next checkpoint:** PHASE 2 — Solver
+**Next checkpoint:** PHASE 3 — Generator + difficulty analysis
