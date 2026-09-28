@@ -23,6 +23,7 @@ export {
 	buildLargeLayoutBoard,
 	buildPartialRemovedBoard,
 	buildPartialRowBoard,
+	buildPhysicalGapBoard,
 	loadPlaytestFixture,
 	representativeAsDevFixtures,
 	type LoadFixtureResult,

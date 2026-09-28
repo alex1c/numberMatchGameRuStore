@@ -43,6 +43,7 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 	>(null)
 	const [scrollToEndToken, setScrollToEndToken] = useState(0)
 	const [showBannerSlot, setShowBannerSlot] = useState(DEV_GAME_BANNER_EXPERIMENT)
+	const [showDevCoords, setShowDevCoords] = useState(false)
 	const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -176,6 +177,7 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 				onCellPress={handleCellPress}
 				interactionLocked={session.interactionLocked || session.hintBusy}
 				scrollToEndToken={scrollToEndToken}
+				showDevCoords={__DEV__ && showDevCoords}
 			/>
 
 			<Text
@@ -199,16 +201,27 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 			) : null}
 
 			{__DEV__ ? (
-				<Pressable
-					onPress={() => setShowBannerSlot((v) => !v)}
-					style={styles.devToggle}
-					testID="dev-banner-toggle"
-				>
-					<Text style={{ color: theme.colors.textMuted, fontSize: 11 }}>
-						DEV BannerSlot {showBannerSlot ? 'ON' : 'OFF'} ({BANNER_SLOT_HEIGHT}
-						px)
-					</Text>
-				</Pressable>
+				<>
+					<Pressable
+						onPress={() => setShowBannerSlot((v) => !v)}
+						style={styles.devToggle}
+						testID="dev-banner-toggle"
+					>
+						<Text style={{ color: theme.colors.textMuted, fontSize: 11 }}>
+							DEV BannerSlot {showBannerSlot ? 'ON' : 'OFF'} ({BANNER_SLOT_HEIGHT}
+							px)
+						</Text>
+					</Pressable>
+					<Pressable
+						onPress={() => setShowDevCoords((v) => !v)}
+						style={styles.devToggle}
+						testID="dev-coords-toggle"
+					>
+						<Text style={{ color: theme.colors.textMuted, fontSize: 11 }}>
+							DEV coords {showDevCoords ? 'ON' : 'OFF'}
+						</Text>
+					</Pressable>
+				</>
 			) : null}
 
 			{showBannerSlot ? <BannerSlot visible /> : null}

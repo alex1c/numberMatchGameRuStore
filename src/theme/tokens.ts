@@ -19,6 +19,9 @@ export interface ThemeColors {
 	readonly cellHint: string
 	readonly cellInvalid: string
 	readonly cellRemoved: string
+	/** Subtle empty-slot fill (removed position inside a live row) */
+	readonly cellSlotFill: string
+	readonly cellSlotBorder: string
 	readonly cellDigit: string
 	readonly cellDigitSelected: string
 	readonly controlPrimary: string
@@ -44,6 +47,8 @@ export const colors: Record<ColorSchemeName, ThemeColors> = {
 		cellHint: '#D4E8DB',
 		cellInvalid: '#E8C8C4',
 		cellRemoved: 'transparent',
+		cellSlotFill: 'rgba(28, 43, 36, 0.04)',
+		cellSlotBorder: 'rgba(28, 43, 36, 0.14)',
 		cellDigit: '#1C2B24',
 		cellDigitSelected: '#F7FAF8',
 		controlPrimary: '#2F6B4F',
@@ -67,6 +72,8 @@ export const colors: Record<ColorSchemeName, ThemeColors> = {
 		cellHint: '#2F4A3A',
 		cellInvalid: '#4A2E2C',
 		cellRemoved: 'transparent',
+		cellSlotFill: 'rgba(232, 240, 235, 0.05)',
+		cellSlotBorder: 'rgba(232, 240, 235, 0.16)',
 		cellDigit: '#E8F0EB',
 		cellDigitSelected: '#121A16',
 		controlPrimary: '#6FBF93',

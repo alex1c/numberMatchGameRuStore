@@ -27,6 +27,14 @@ export interface PlaytestFixture {
 	readonly buildBoard?: () => BoardState
 }
 
+/** Physical OPPO gap regression: same values, wrong geometry, no moves. */
+export function buildPhysicalGapBoard(): BoardState {
+	return boardFromFixture(`
+		2 6 . . .
+		. . . 2 6
+	`)
+}
+
 /** Tiny completion board: 1 9 */
 export function buildCompletionBoard(): BoardState {
 	return boardFromFixture('1 9')
@@ -109,18 +117,18 @@ export const DEV_EXTENDED_FIXTURES: readonly PlaytestFixture[] = [
 	{
 		id: 'densest',
 		label: 'densest',
-		note: 'large initial cell count EXPERT',
+		note: 'max initial cell count EXPERT (40)',
 		kind: 'generated',
 		profile: 'EXPERT',
-		seed: 10025,
+		seed: 10001,
 	},
 	{
 		id: 'largest-growth',
 		label: 'largest growth',
-		note: 'high maxRows during solution',
+		note: 'high maxRows during solution (8)',
 		kind: 'generated',
 		profile: 'EXPERT',
-		seed: 10057,
+		seed: 10006,
 	},
 	{
 		id: 'high-choice',
@@ -128,15 +136,24 @@ export const DEV_EXTENDED_FIXTURES: readonly PlaytestFixture[] = [
 		note: 'high choiceStates along path',
 		kind: 'generated',
 		profile: 'EXPERT',
-		seed: 10048,
+		seed: 10018,
 	},
 	{
-		id: 'medium-10057',
-		label: 'MEDIUM 10057',
-		note: 'solver performance fixture — do NOT auto-solve',
+		id: 'expert-10016',
+		label: 'EXPERT 10016',
+		note: 'solver performance fixture gv2 — do NOT auto-solve',
 		kind: 'generated',
-		profile: 'MEDIUM',
-		seed: 10057,
+		profile: 'EXPERT',
+		seed: 10016,
+	},
+	{
+		id: 'physical-gap-regression',
+		label: 'physical-gap-regression',
+		note: '2 6 / . . . 2 6 — compatible values, no legal line; DEV QA',
+		kind: 'hand',
+		profile: 'CUSTOM',
+		seed: 0,
+		buildBoard: buildPhysicalGapBoard,
 	},
 	{
 		id: 'partial-row',

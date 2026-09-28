@@ -31,6 +31,8 @@ interface NumberBoardProps {
 	readonly interactionLocked?: boolean
 	/** When true, scroll toward end after content grows (append). */
 	readonly scrollToEndToken?: number
+	/** DEV-only coordinate overlay on cells. */
+	readonly showDevCoords?: boolean
 }
 
 export function NumberBoard({
@@ -41,6 +43,7 @@ export function NumberBoard({
 	onCellPress,
 	interactionLocked = false,
 	scrollToEndToken = 0,
+	showDevCoords = false,
 }: NumberBoardProps) {
 	const theme = useTheme()
 	const scrollRef = useRef<ScrollView>(null)
@@ -119,6 +122,7 @@ export function NumberBoard({
 					visual={visualFor(index)}
 					onPress={onCellPress}
 					disabled={interactionLocked}
+					showDevCoords={showDevCoords}
 				/>,
 			)
 		}
@@ -171,9 +175,12 @@ const styles = StyleSheet.create({
 	scrollContent: {
 		paddingVertical: spacing.sm,
 		alignItems: 'flex-start',
+		justifyContent: 'flex-start',
+		flexGrow: 0,
 	},
 	row: {
 		flexDirection: 'row',
 		alignItems: 'center',
+		flexGrow: 0,
 	},
 })

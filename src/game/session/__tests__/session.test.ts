@@ -22,7 +22,7 @@ function identity(
 	overrides: Partial<SessionPuzzleIdentity> = {},
 ): SessionPuzzleIdentity {
 	return {
-		generationVersion: 1,
+		generationVersion: 1, // overridden in tests that load real fixtures
 		difficultyProfileVersion: 1,
 		seed: 1,
 		profile: 'CUSTOM',
@@ -185,6 +185,22 @@ describe('game session reducer', () => {
 		}
 		expect(state.history.length).toBeLessThanOrEqual(HISTORY_BOUND)
 	})
+
+	it('undo after collapse restores exact pre-collapse board', () => {
+		const board = boardFromFixture(`
+			1 9
+			2 8
+		`, 2)
+		let state = createGameSession(identity({ label: 'collapse-undo' }), board)
+		const before = cloneBoard(state.board)
+		state = reduceGameSession(state, { type: 'SELECT_CELL', index: 0 })
+		state = reduceGameSession(state, { type: 'SELECT_CELL', index: 1 })
+		expect(state.board.cells).toHaveLength(2)
+		state = reduceGameSession(state, { type: 'UNDO' })
+		expect(toCanonicalBoard(state.board)).toBe(toCanonicalBoard(before))
+		expect(state.board.cells.map((c) => c.id)).toEqual(before.cells.map((c) => c.id))
+		expect(state.board.nextCellSeq).toBe(before.nextCellSeq)
+	})
 })
 
 describe('loadPlaytestFixture', () => {
@@ -201,7 +217,7 @@ describe('loadPlaytestFixture', () => {
 		if (loaded.ok) {
 			expect(loaded.identity.profile).toBe('EASY')
 			expect(loaded.identity.seed).toBe(10000)
-			expect(loaded.identity.generationVersion).toBe(1)
+			expect(loaded.identity.generationVersion).toBe(2)
 			expect(loaded.board.cells.length).toBeGreaterThan(0)
 		}
 	}, 30_000)
