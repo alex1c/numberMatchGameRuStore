@@ -6,6 +6,6 @@ export const APP_IDENTITY = {
 	displayName: 'Number Match',
 	packageId: 'com.calculatorplatform.numbermatch',
 	scheme: 'number-match',
-	devtoolsVersion: '1.1.0',
-	devtoolsSha: '527d089ac229e4f7af15d8e4ca04efaaa85acd92',
+	devtoolsVersion: '1.1.1',
+	devtoolsSha: 'ad2ff4469e2aaf301a4b4e93eb633ddf17c8490c',
 } as const

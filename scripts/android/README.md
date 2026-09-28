@@ -80,6 +80,16 @@ unauthorized device, missing native project in Build mode, failed version
 verification, and other uncertain states stop with a layer-specific
 diagnostic.
 
+## Windows PowerShell 5.1
+
+These helpers must run in Windows PowerShell 5.1. Do not require `pwsh`.
+Keep executable `.ps1` source ASCII-safe so legacy code-page decoding cannot
+turn an em dash into a `ParserError`. After editing:
+
+```powershell
+powershell -NoProfile -File .\scripts\android\validate-ps51-encoding.ps1
+```
+
 Default mode reuses an installed native build and starts/reuses the current
 project's Metro. `-Build` runs only `android\gradlew.bat assembleDebug
 --console=plain`, verifies `BUILD SUCCESSFUL`, installs the standard debug APK,

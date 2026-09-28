@@ -5,7 +5,7 @@ Android / RuStore ForestMusic project.
 - Working title: **Number Match**
 - Package / applicationId: `com.calculatorplatform.numbermatch`
 - Expo/RN scheme: `number-match`
-- ForestMusic DevTools: **v1.1.0** (`527d089ac229e4f7af15d8e4ca04efaaa85acd92`)
+- ForestMusic DevTools: **v1.1.1** (`ad2ff4469e2aaf301a4b4e93eb633ddf17c8490c`)
 
 ## Paths
 

@@ -1,7 +1,7 @@
 # Architecture — Number Match
 
-ForestMusic DevTools: v1.1.0  
-Package: `com.calculatorplatform.numbermatch`  
+ForestMusic DevTools: v1.1.1
+Package: `com.calculatorplatform.numbermatch`
 Scheme: `number-match`
 
 ## Layering

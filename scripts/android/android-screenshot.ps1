@@ -148,10 +148,10 @@ try {
 } catch {
 	$message = $_.Exception.Message
 	if ($message -match '^SCREENSHOT_STOP\|([^|]+)\|(.+)$') {
-		Write-Host "STOP — $($Matches[1])"
+		Write-Host "STOP - $($Matches[1])"
 		Write-Host "Next: $($Matches[2])"
 	} else {
-		Write-Host "STOP — $message"
+		Write-Host "STOP - $message"
 	}
 	exit 1
 }
