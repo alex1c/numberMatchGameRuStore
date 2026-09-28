@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Number Match",
+    "slug": "number-match",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "number-match",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.calculatorplatform.numbermatch"
+    },
+    "android": {
+      "package": "com.calculatorplatform.numbermatch",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#EEF3F0",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-system-ui"
+    ]
+  }
+}

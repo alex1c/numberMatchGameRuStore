@@ -1,0 +1,46 @@
+# Number Match
+
+Android / RuStore ForestMusic project.
+
+- Working title: **Number Match**
+- Package / applicationId: `com.calculatorplatform.numbermatch`
+- Expo/RN scheme: `number-match`
+- ForestMusic DevTools: **v1.1.0** (`527d089ac229e4f7af15d8e4ca04efaaa85acd92`)
+
+## Paths
+
+| Role | Path |
+| --- | --- |
+| Cursor | `D:\PetProject\numberMatchGameRuStore` |
+| Codex / Android QA | `D:\petProject\numberMatchGameRuStore` |
+| GitHub | https://github.com/alex1c/numberMatchGameRuStore |
+
+## Scripts
+
+```bash
+npm test
+npm run typecheck
+npm run lint
+npm start
+```
+
+Android device QA (after native prebuild / dev client exists):
+
+```powershell
+.\scripts\android\android-device-qa.ps1
+```
+
+Standard Metro: port **8081** (`--host lan`). Do not work around with 8082.
+
+## Phase status
+
+- **PHASE 0** — project bootstrap (Expo 57 / RN / React 19, safe-area, theme, navigation, BannerSlot geometry, Android QA helpers)
+- **PHASE 1** — pure TypeScript Number Match game core + Jest coverage
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CORE_RULES.md](docs/CORE_RULES.md).
+
+## Intentionally not implemented yet
+
+Solver, generator, campaign, polished gameplay UI, persistence I/O, Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
+
+**Next checkpoint:** PHASE 2 — Solver
