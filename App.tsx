@@ -4,12 +4,15 @@
  * No magic bottom offsets; no device-specific translate hacks.
  */
 
+import { type ReactElement } from 'react'
 import { StatusBar } from 'expo-status-bar'
 import { StyleSheet, View } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 
 import { BannerSlot } from './src/components/BannerSlot'
 import { useAppNavigation } from './src/navigation'
+import { GameSessionProvider } from './src/game/session/GameSessionContext'
+import { GameScreen } from './src/screens/GameScreen'
 import { HomeScreen } from './src/screens/HomeScreen'
 import { PlaceholderScreen } from './src/screens/PlaceholderScreen'
 import { ThemeProvider, useTheme } from './src/theme'
@@ -18,18 +21,15 @@ import type { AppRouteName } from './src/navigation'
 const PLACEHOLDER_COPY: Partial<
 	Record<AppRouteName, { title: string; note?: string }>
 > = {
-	game: {
-		title: 'Game',
-		note: 'Gameplay UI arrives after solver/generator phases.',
-	},
 	levels: { title: 'Levels', note: 'Campaign levels arrive later.' },
 	daily: { title: 'Daily', note: 'Daily mode arrives later.' },
 	statistics: { title: 'Statistics' },
 	achievements: { title: 'Achievements' },
 	settings: { title: 'Settings' },
 	training: {
-		title: 'Training',
-		note: 'Replayable onboarding — never an ad surface.',
+		title: 'Правила',
+		note:
+			'Интерактивное обучение — Phase 5. Сейчас: числа совпадают если равны или в сумме дают 10; путь по горизонтали/вертикали/диагонали или через конец строки; пустые клетки между допустимы; Добавить — когда нет ходов.',
 	},
 	about: {
 		title: 'About',
@@ -39,15 +39,22 @@ const PLACEHOLDER_COPY: Partial<
 
 /**
  * Single navigation owner so banner policy and screens share one stack.
- * Training and Game do not reserve banner geometry in Phase 0/1.
+ * Training and Game do not reserve banner geometry (gameplay decision: no sticky banner).
  */
 function AppShell() {
 	const theme = useTheme()
 	const nav = useAppNavigation('home')
 	const showBanner = nav.current !== 'training' && nav.current !== 'game'
 
-	let screen = <HomeScreen onNavigate={nav.navigate} />
-	if (nav.current !== 'home') {
+	let screen: ReactElement = <HomeScreen onNavigate={nav.navigate} />
+	if (nav.current === 'game') {
+		screen = (
+			<GameScreen
+				onHome={nav.goHome}
+				onTraining={() => nav.navigate('training')}
+			/>
+		)
+	} else if (nav.current !== 'home') {
 		const copy = PLACEHOLDER_COPY[nav.current]
 		screen = (
 			<PlaceholderScreen
@@ -88,7 +95,9 @@ export default function App() {
 	return (
 		<SafeAreaProvider>
 			<ThemeProvider>
-				<AppShell />
+				<GameSessionProvider>
+					<AppShell />
+				</GameSessionProvider>
 			</ThemeProvider>
 		</SafeAreaProvider>
 	)
