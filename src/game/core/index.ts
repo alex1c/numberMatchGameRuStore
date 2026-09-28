@@ -66,6 +66,8 @@ export {
 	removePair,
 } from './moves'
 
+export { collapseEmptyRows } from './collapse'
+
 export { appendRemainingNumbers } from './append'
 
 export {

@@ -17,7 +17,9 @@ export interface Coordinate {
 
 /**
  * One board cell.
- * Removed cells stay in the linear geometry; values are kept for debugging/history.
+ * Removed cells stay in place within a row until that row is fully empty;
+ * fully empty complete rows are then collapsed by `collapseEmptyRows`.
+ * Values on removed cells are kept for debugging/history.
  */
 export interface Cell {
 	readonly id: CellId

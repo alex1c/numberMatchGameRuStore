@@ -56,6 +56,8 @@ describe('robustness', () => {
 		const result = removePair(board, 0, 1)
 		expect(result.ok).toBe(true)
 		expect(board.cells).toEqual(snapshot)
-		expect(result.ok && result.state.cells[0]?.removed).toBe(true)
+		// Full-row clear collapses to empty board under gv2 rules.
+		expect(result.ok && isBoardCleared(result.state)).toBe(true)
+		expect(result.ok && result.state.cells).toHaveLength(0)
 	})
 })

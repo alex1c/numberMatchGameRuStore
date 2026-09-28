@@ -2,8 +2,8 @@
  * Generator identity / versioning contracts.
  */
 
-/** Bump only on breaking generation algorithm / PRNG / fingerprint changes. */
-export const GENERATION_VERSION = 1 as const
+/** Bump only on breaking generation algorithm / PRNG / fingerprint / play semantics. */
+export const GENERATION_VERSION = 2 as const
 
 /** Bump when provisional difficulty thresholds / profile ranges change. */
 export const DIFFICULTY_PROFILE_VERSION = 1 as const

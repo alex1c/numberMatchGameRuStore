@@ -4,12 +4,14 @@
  */
 
 import { cloneBoard } from './board'
+import { collapseEmptyRows } from './collapse'
 import { canMatch, explainMatch } from './match'
 import type { BoardState, Move, RemovePairResult } from './types'
 
 /**
  * Remove a valid matching pair.
- * On success both cells become `removed` without compacting geometry.
+ * On success both cells become `removed`, then empty complete rows collapse
+ * (see `collapseEmptyRows` / RULES_DECISION.md).
  * On failure the original state is returned unchanged (same reference).
  */
 export function removePair(
@@ -33,13 +35,15 @@ export function removePair(
 	cells[aIndex] = { ...cellA, removed: true }
 	cells[bIndex] = { ...cellB, removed: true }
 
+	const afterRemoval: BoardState = {
+		width: next.width,
+		nextCellSeq: next.nextCellSeq,
+		cells,
+	}
+
 	return {
 		ok: true,
-		state: {
-			width: next.width,
-			nextCellSeq: next.nextCellSeq,
-			cells,
-		},
+		state: collapseEmptyRows(afterRemoval),
 	}
 }
 

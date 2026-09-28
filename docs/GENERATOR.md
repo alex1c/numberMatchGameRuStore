@@ -2,8 +2,8 @@
 
 ## Versions
 
-- `generationVersion`: **1**
-- `difficultyProfileVersion`: **1** (provisional algorithmic labels)
+- `generationVersion`: **2** (empty-row collapse after `removePair`)
+- `difficultyProfileVersion`: **1** (reassess after gv2 full audit)
 
 ## Pipeline
 

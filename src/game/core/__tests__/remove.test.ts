@@ -11,7 +11,7 @@ import {
 } from '../index'
 
 describe('removePair', () => {
-	it('removes a valid pair without compacting geometry', () => {
+	it('removes a valid pair and keeps in-row empty slots (no full-row collapse)', () => {
 		const board = boardFromFixture('1 3 7 4 6', 5)
 		const result = removePair(board, 1, 2) // 3+7
 		expect(result.ok).toBe(true)
