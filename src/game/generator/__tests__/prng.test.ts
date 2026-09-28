@@ -22,7 +22,7 @@ describe('seeded PRNG', () => {
 	it('matches golden Mulberry32 sequence for seed 1', () => {
 		const prng = createPrng(1)
 		const seq = Array.from({ length: 5 }, () => prng.next())
-		// Frozen contract for generationVersion 1
+		// Frozen Mulberry32 contract (independent of generationVersion)
 		expect(seq.map((n) => n.toFixed(8))).toEqual([
 			'0.62707394',
 			'0.00273572',

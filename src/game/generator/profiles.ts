@@ -2,10 +2,9 @@
  * Provisional algorithmic difficulty profiles — single source of truth.
  * These are NOT final human difficulty labels.
  *
- * Calibration evidence (generationVersion=1, difficultyProfileVersion=1):
- * Broad sample after opening-pair placement showed score formula naturally
- * clusters roughly by board size / path complexity. Thresholds below were set
- * from those observed clusters (not arbitrary 0–10 ladders).
+ * Calibration evidence (generationVersion=2, difficultyProfileVersion=1):
+ * After empty-row collapse, explored-state outliers collapsed dramatically vs gv1.
+ * Score clusters by board size / path complexity remain separated across profiles.
  */
 
 import type { DifficultyMetrics, GeneratorSolverConfig } from './types'
