@@ -15,6 +15,8 @@ export type AppRouteName =
 	| 'settings'
 	| 'training'
 	| 'about'
+	/** DEV-only Density Lab — never used in production builds. */
+	| 'densityLab'
 
 export type AppRoute = { readonly name: AppRouteName }
 
@@ -107,6 +109,9 @@ export function routeToBannerPlacement(
 			return 'training'
 		case 'game':
 			return 'game'
+		case 'densityLab':
+			// Treat like settings for banner policy; AppShell hides banner for this route.
+			return 'settings'
 		default: {
 			const _exhaustive: never = route
 			return _exhaustive

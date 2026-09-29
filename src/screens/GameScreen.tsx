@@ -15,6 +15,7 @@ import {
 
 import { useAppState } from '../app'
 import { CAMPAIGN_LEVEL_COUNT } from '../game/campaign'
+import { DENSITY_FIXTURES, loadDensityFixture } from '../dev/density'
 import { BannerSlot } from '../components/BannerSlot'
 import { CompletionOverlay } from '../components/game/CompletionOverlay'
 import { GameControls } from '../components/game/GameControls'
@@ -29,6 +30,8 @@ interface GameScreenProps {
 	readonly onTraining: () => void
 	/** Replace top route with game (Next / Replay stay on one Game screen). */
 	readonly onReplaceGame?: () => void
+	/** DEV Density Lab return — only used for density fixtures. */
+	readonly onDensityLab?: () => void
 }
 
 /**
@@ -41,6 +44,7 @@ export function GameScreen({
 	onHome,
 	onTraining,
 	onReplaceGame,
+	onDensityLab,
 }: GameScreenProps) {
 	const theme = useTheme()
 	const {
@@ -75,6 +79,13 @@ export function GameScreen({
 	const isCampaign = sessionSource === 'campaign' && activeSession !== null
 	const campaignLevel = activeSession?.level ?? null
 	const campaignPurpose = activeSession?.purpose ?? null
+	const densityMeta =
+		sessionSource === 'dev_fixture'
+			? DENSITY_FIXTURES.find(
+					(f) => f.fingerprint === session?.identity.fingerprint,
+				)
+			: undefined
+	const isDensityLab = Boolean(densityMeta)
 
 	useEffect(() => {
 		return () => {
@@ -245,7 +256,28 @@ export function GameScreen({
 	])
 
 	const handleReplay = useCallback(async () => {
-		if (nextGuard.current || !campaignLevel) {
+		if (nextGuard.current) {
+			return
+		}
+		if (isDensityLab && densityMeta) {
+			nextGuard.current = true
+			try {
+				const loaded = loadDensityFixture(densityMeta.id)
+				if (!loaded.ok) {
+					Alert.alert(strings.errorTitle, loaded.error)
+					return
+				}
+				completionCommitted.current = null
+				lastSyncedKey.current = null
+				setDismissedCompletionKey(null)
+				startSession(loaded.identity, loaded.board)
+				onReplaceGame?.()
+			} finally {
+				nextGuard.current = false
+			}
+			return
+		}
+		if (!campaignLevel) {
 			return
 		}
 		nextGuard.current = true
@@ -265,7 +297,14 @@ export function GameScreen({
 		} finally {
 			nextGuard.current = false
 		}
-	}, [campaignLevel, onReplaceGame, startCampaignLevel, startSession])
+	}, [
+		campaignLevel,
+		densityMeta,
+		isDensityLab,
+		onReplaceGame,
+		startCampaignLevel,
+		startSession,
+	])
 
 	if (!session) {
 		return (
@@ -299,12 +338,16 @@ export function GameScreen({
 
 	const headerTitle = isCampaign && campaignLevel
 		? strings.levelHeader(campaignLevel)
-		: strings.appName
+		: isDensityLab && densityMeta
+			? densityMeta.label
+			: strings.appName
 	const headerSubtitle = isCampaign
 		? __DEV__
 			? `${session.identity.profile} · seed ${session.identity.seed}`
 			: undefined
-		: `${session.identity.label}`
+		: isDensityLab
+			? session.identity.label
+			: `${session.identity.label}`
 
 	const showNext =
 		isCampaign &&
@@ -323,6 +366,14 @@ export function GameScreen({
 		: campaignPurpose === 'replay'
 			? 'campaign_replay'
 			: 'campaign_progression'
+
+	const completionHome = () => {
+		if (isDensityLab && onDensityLab) {
+			onDensityLab()
+			return
+		}
+		onHome()
+	}
 
 	return (
 		<View
@@ -422,10 +473,15 @@ export function GameScreen({
 				}
 				nextBusy={nextBusy}
 				onNext={showNext ? () => void handleNext() : undefined}
-				onReplay={isCampaign ? () => void handleReplay() : undefined}
-				onHome={() => {
-					onHome()
-				}}
+				onReplay={
+					isCampaign || isDensityLab
+						? () => void handleReplay()
+						: undefined
+				}
+				onHome={completionHome}
+				homeLabel={
+					isDensityLab ? strings.densityLabBack : undefined
+				}
 				onClose={() => {
 					if (completionKey) {
 						setDismissedCompletionKey(completionKey)
@@ -435,7 +491,7 @@ export function GameScreen({
 					undoAllowedAfterCompletion && session.history.length > 0
 				}
 				onUndo={() => dispatch({ type: 'UNDO' })}
-				showRestart={!isCampaign}
+				showRestart={!isCampaign && !isDensityLab}
 				onRestart={confirmRestart}
 			/>
 		</View>

@@ -17,6 +17,7 @@ import { useAppNavigation, type AppRouteName } from './src/navigation'
 import { GameScreen } from './src/screens/GameScreen'
 import { HomeScreen } from './src/screens/HomeScreen'
 import { LevelsScreen } from './src/screens/LevelsScreen'
+import { DensityLabScreen } from './src/screens/DensityLabScreen'
 import { PlaceholderScreen } from './src/screens/PlaceholderScreen'
 import { ThemeProvider, useTheme } from './src/theme'
 
@@ -76,7 +77,10 @@ function AppShell() {
 	const { initialRoute, startCampaignLevel, trainingCompleted } = useAppState()
 	const { startSession } = useGameSession()
 	const nav = useAppNavigation(initialRoute)
-	const showBanner = nav.current !== 'training' && nav.current !== 'game'
+	const showBanner =
+		nav.current !== 'training' &&
+		nav.current !== 'game' &&
+		nav.current !== 'densityLab'
 
 	const startLevel1FromTraining = async () => {
 		const result = await startCampaignLevel(1, 'progression')
@@ -98,6 +102,7 @@ function AppShell() {
 				onHome={nav.goHome}
 				onTraining={() => nav.navigate('training')}
 				onReplaceGame={() => nav.replace('game')}
+				onDensityLab={() => nav.replace('densityLab')}
 			/>
 		)
 	} else if (nav.current === 'levels') {
@@ -107,6 +112,17 @@ function AppShell() {
 				onOpenGame={() => nav.navigate('game')}
 			/>
 		)
+	} else if (nav.current === 'densityLab') {
+		if (typeof __DEV__ === 'undefined' || !__DEV__) {
+			screen = <HomeScreen onNavigate={nav.navigate} />
+		} else {
+			screen = (
+				<DensityLabScreen
+					onHome={nav.goHome}
+					onOpenGame={() => nav.navigate('game')}
+				/>
+			)
+		}
 	} else if (nav.current === 'training') {
 		screen = (
 			<TrainingScreen

@@ -77,4 +77,9 @@ export const strings = {
 	trainingStartGame: 'Начать игру',
 	completionStats: (matches: number, appends: number) =>
 		`Пар: ${matches} · Добавлений: ${appends}`,
+	densityLabTitle: 'Density Lab',
+	densityLabNote:
+		'Сравнение плотности поля. Не кампания — прогресс не меняется.',
+	densityLabEntry: 'Density Lab',
+	densityLabBack: 'В Density Lab',
 } as const

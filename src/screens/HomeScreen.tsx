@@ -277,6 +277,22 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 					<Text style={[styles.note, { color: theme.colors.textMuted }]}>
 						{formatDevDiagnostics(root)}
 					</Text>
+					<Pressable
+						onPress={() => onNavigate('densityLab')}
+						style={[
+							styles.primary,
+							{ backgroundColor: theme.colors.controlSecondary },
+						]}
+						accessibilityRole="button"
+						accessibilityLabel={strings.densityLabEntry}
+						testID="dev-density-lab"
+					>
+						<Text
+							style={[styles.primaryText, { color: theme.colors.text }]}
+						>
+							{strings.densityLabEntry}
+						</Text>
+					</Pressable>
 					{hasSession && session && sessionSource === 'dev_fixture' ? (
 						<Pressable
 							onPress={() => onNavigate('game')}

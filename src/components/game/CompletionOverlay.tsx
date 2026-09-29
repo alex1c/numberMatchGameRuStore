@@ -23,6 +23,8 @@ interface CompletionOverlayProps {
 	readonly onNext?: () => void
 	readonly onReplay?: () => void
 	readonly onHome: () => void
+	/** Override Home button label (e.g. Density Lab back). */
+	readonly homeLabel?: string
 	readonly onClose: () => void
 	/** DEV / non-campaign only — hidden after campaign completion (§241). */
 	readonly canUndo?: boolean
@@ -43,6 +45,7 @@ export function CompletionOverlay({
 	onNext,
 	onReplay,
 	onHome,
+	homeLabel,
 	onClose,
 	canUndo = false,
 	onUndo,
@@ -114,7 +117,7 @@ export function CompletionOverlay({
 							/>
 						) : null}
 						<Action
-							label={strings.home}
+							label={homeLabel ?? strings.home}
 							onPress={onHome}
 							testID="completion-home"
 						/>
