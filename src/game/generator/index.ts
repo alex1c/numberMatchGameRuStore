@@ -35,6 +35,11 @@ export {
 
 export { analyzeDifficulty } from './metrics'
 export { generatePuzzle, validateGenerateOptions } from './generate'
+export { reconstructGeneratedPuzzle } from './reconstruct'
+export type {
+	ReconstructGeneratedPuzzleOptions,
+	ReconstructGeneratedPuzzleResult,
+} from './reconstruct'
 export {
 	runAudit,
 	defaultFullTargets,
