@@ -14,9 +14,12 @@
     "test:watch": "jest --watch",
     "solver:bench": "tsx src/game/solver/bench.ts",
     "generator:audit": "tsx src/game/generator/auditCli.ts",
+    "campaign:build": "tsx src/game/campaign/builderCli.ts",
+    "campaign:audit": "tsx src/game/campaign/auditCli.ts",
     "android:qa": "powershell -ExecutionPolicy Bypass -File ./scripts/android/android-device-qa.ps1"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.25",
     "expo-linking": "~57.0.11",
     "expo-status-bar": "~57.0.1",
