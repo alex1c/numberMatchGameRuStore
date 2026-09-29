@@ -23,6 +23,7 @@ npm run typecheck
 npm run lint
 npm run solver:bench
 npm run generator:audit -- --small
+npm run campaign:audit
 npm start
 ```
 
@@ -40,11 +41,15 @@ Standard Metro: port **8081** (`--host lan`). Do not work around with 8082.
 - **PHASE 1** — pure TypeScript Number Match game core + Jest coverage
 - **PHASE 2** — deterministic solver + replay + benchmark harness
 - **PHASE 3** — seeded generator + provisional difficulty profiles + 1000-puzzle audit
+- **PHASE 4** — gameplay UI (board, session, playtest fixtures)
+- **PHASE 5** — **in progress / CODE pending AVD** — campaign catalog + persistence + Training + Levels + Home/Game campaign flow
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/CORE_RULES.md](docs/CORE_RULES.md), [docs/SOLVER.md](docs/SOLVER.md), [docs/GENERATOR.md](docs/GENERATOR.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE5.md](docs/PHASE5.md), [docs/CORE_RULES.md](docs/CORE_RULES.md), [docs/SOLVER.md](docs/SOLVER.md), [docs/GENERATOR.md](docs/GENERATOR.md).
+
+Physical Android PASS is **not** claimed until AVD/device QA is run.
 
 ## Intentionally not implemented yet
 
-Campaign catalog, polished gameplay UI, persistence I/O, Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
+Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
 
-**Next checkpoint:** PHASE 4 — Gameplay UI
+**Next checkpoint:** PHASE 5 physical QA on AVD / device

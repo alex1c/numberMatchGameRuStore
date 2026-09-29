@@ -11,31 +11,41 @@ Scheme: `number-match`
 | `src/game/core` | Pure TypeScript Number Match domain. No React Native. |
 | `src/game/solver` | Deterministic bounded DFS solver + replay (PHASE 2). |
 | `src/game/generator` | Seeded generator, metrics, profiles, audit (PHASE 3). |
-| `src/navigation`, `src/screens`, `src/components` | Minimal UI shell (not Expo Router). |
+| `src/game/campaign` | 1000-level catalog + resolve/reconstruct (PHASE 5). |
+| `src/storage` | AsyncStorage persistence — `PersistRepository` + schema v1. |
+| `src/app` | AppStateProvider — hydrate, campaign progress bridge. |
+| `src/features/training` | Interactive training (no ads). |
+| `src/navigation`, `src/screens`, `src/components` | App shell UI (not Expo Router). |
 | `src/theme` | Light/dark foundation. |
-| `src/storage` | Persistence **boundary/interface** only — no I/O yet. |
 | `src/ads/policy` | Banner placement policy; no ad SDK. |
 
 Game mathematics must never live inside React components.
 
+## Provider order
+
+`SafeAreaProvider → ThemeProvider → AppStateProvider → GameSessionProvider → AppShell`
+
+Initial route is chosen **once** after hydrate: Training if `!trainingCompleted`, else Home.
+
 ## Mutability policy
 
-Core transitions are **pure immutable**: `state → operation → newState`.  
+Core transitions are **pure immutable**: `state → operation → newState`.
 Invalid moves return the original state reference unchanged.
 
-## Puzzle identity (future)
+## Puzzle identity
 
-Do not key React lifecycles or saves on mutable `updatedAt`, move counters, or board hashes that change every move. Future identity is conceptually `mode + level/seed/date + generationVersion`.
+Campaign sessions key on `mode + level + generationVersion + seed + profile + fingerprint`.
+Do not key React lifecycles on mutable move counters alone.
 
 ## Banner geometry
 
-Order: `CONTENT → BANNER → SAFE AREA → SYSTEM`.  
-Reserved on Home / Levels / Daily / Statistics / Achievements / Settings / About / Reminders.  
-**Training: no ads.**  
-**Game: sticky banner undecided** — not reserved inside the board in Phase 0/1.
+Order: `CONTENT → BANNER → SAFE AREA → SYSTEM`.
+Reserved on Home / Levels / Daily / Statistics / Achievements / Settings / About.
+**Training: no ads.**
+**Game: no sticky banner** by default (DEV may toggle for measurement).
 
-## Out of scope (later phases)
+## Out of scope (later)
 
-Campaign catalog, polished UI, persistence I/O, AppMetrica, production ads, rewarded, RuStore signing.
+Daily, AppMetrica, production ads, rewarded, RuStore signing.
 
-Solver: [SOLVER.md](SOLVER.md). Generator: [GENERATOR.md](GENERATOR.md).
+PHASE 5 details: [PHASE5.md](PHASE5.md). Solver: [SOLVER.md](SOLVER.md). Generator: [GENERATOR.md](GENERATOR.md).
