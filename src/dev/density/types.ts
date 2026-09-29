@@ -8,6 +8,10 @@ export type DensityFixtureId =
 	| 'density-7x6'
 	| 'density-8x5'
 	| 'density-8x6'
+	| 'density-8x7'
+	| 'density-8x8'
+	| 'density-8x9'
+	| 'density-8x10'
 	| 'density-9x4'
 	| 'density-9x5'
 

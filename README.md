@@ -43,7 +43,7 @@ Standard Metro: port **8081** (`--host lan`). Do not work around with 8082.
 - **PHASE 3** — seeded generator + provisional difficulty profiles + 1000-puzzle audit
 - **PHASE 4** — gameplay UI (board, session, playtest fixtures)
 - **PHASE 5** — CODE PASS (AVD/physical persistence still pending) — campaign + persistence + Training
-- **PHASE 5A** — Density Lab ready for physical OPPO calibration (Campaign v1 unchanged)
+- **PHASE 5A / V2** — Density Lab vertical fill (8×6…8×10) ready for OPPO (Campaign v1 unchanged)
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PHASE5.md](docs/PHASE5.md), [docs/DENSITY_CALIBRATION.md](docs/DENSITY_CALIBRATION.md), [docs/CORE_RULES.md](docs/CORE_RULES.md).
 
@@ -53,4 +53,4 @@ Physical Android PASS is **not** claimed until AVD/device QA is run.
 
 Daily, achievements, AppMetrica, Yandex Ads SDK, rewarded, release signing.
 
-**Next checkpoint:** OPPO Density Lab calibration (then decide production width/rows)
+**Next checkpoint:** PHYSICAL OPPO — compare 8×6 / 8×7 / 8×8 / 8×9 / 8×10

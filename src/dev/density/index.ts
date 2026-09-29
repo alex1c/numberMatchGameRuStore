@@ -3,8 +3,7 @@
  * Not production content. Never reachable when __DEV__ === false.
  */
 
-export type { DensityFixtureId, DensityFixtureMeta } from './types'
-export { DENSITY_FIXTURES } from './fixtures'
+export { DENSITY_FIXTURES, DENSITY_V2_VERTICAL_IDS, getDensityV2VerticalFixtures } from './fixtures'
 export {
 	getDensityFixtures,
 	getDensityFixture,
@@ -19,3 +18,4 @@ export {
 } from './viewportFill'
 export type { ViewportFillMetrics, ViewportFillInput } from './viewportFill'
 export { createDensityCandidateBoard } from './experimentalCandidate'
+export type { DensityFixtureId, DensityFixtureMeta } from './types'

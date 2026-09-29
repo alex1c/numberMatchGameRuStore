@@ -1,6 +1,6 @@
 /**
- * DEV Density Lab — compare solver-proven boards of different widths/rows.
- * Production builds must never mount this screen (__DEV__ gate at call sites).
+ * DEV Density Lab — V2 focuses OPPO comparison on 8-column vertical fill.
+ * V1 width survey remains below for reference. Never reachable when __DEV__ === false.
  */
 
 import { useCallback, useMemo, useState } from 'react'
@@ -18,6 +18,7 @@ import {
 	DENSITY_REFERENCE_VIEWPORT_HEIGHT,
 	computeViewportFill,
 	getDensityFixtures,
+	getDensityV2VerticalFixtures,
 	loadDensityFixture,
 	type DensityFixtureId,
 	type DensityFixtureMeta,
@@ -40,7 +41,11 @@ export function DensityLabScreen({
 	const { startSession, isDirty, session } = useGameSession()
 	const [busyId, setBusyId] = useState<string | null>(null)
 
-	const fixtures = useMemo(() => getDensityFixtures(), [])
+	const v2Fixtures = useMemo(() => getDensityV2VerticalFixtures(), [])
+	const v1Reference = useMemo(() => {
+		const v2Ids = new Set(v2Fixtures.map((f) => f.id))
+		return getDensityFixtures().filter((f) => !v2Ids.has(f.id))
+	}, [v2Fixtures])
 
 	const launch = useCallback(
 		(id: DensityFixtureId) => {
@@ -52,7 +57,6 @@ export function DensityLabScreen({
 						Alert.alert('Ошибка', loaded.error)
 						return
 					}
-					// Non-persistent DEV path — Campaign Continue stays intact.
 					markDevFixtureSession()
 					startSession(loaded.identity, loaded.board)
 					onOpenGame()
@@ -105,7 +109,26 @@ export function DensityLabScreen({
 				{strings.densityLabNote}
 			</Text>
 
-			{fixtures.map((fixture) => (
+			<Text style={[styles.section, { color: theme.colors.accent }]}>
+				{strings.densityLabV2Section}
+			</Text>
+			<Text style={[styles.note, { color: theme.colors.textMuted }]}>
+				{strings.densityLabV2Note}
+			</Text>
+			{v2Fixtures.map((fixture) => (
+				<FixtureCard
+					key={fixture.id}
+					fixture={fixture}
+					busy={busyId === fixture.id}
+					onPress={() => launch(fixture.id)}
+					compact
+				/>
+			))}
+
+			<Text style={[styles.section, { color: theme.colors.textMuted }]}>
+				{strings.densityLabV1Section}
+			</Text>
+			{v1Reference.map((fixture) => (
 				<FixtureCard
 					key={fixture.id}
 					fixture={fixture}
@@ -131,10 +154,12 @@ function FixtureCard({
 	fixture,
 	busy,
 	onPress,
+	compact = false,
 }: {
 	readonly fixture: DensityFixtureMeta
 	readonly busy: boolean
 	readonly onPress: () => void
+	readonly compact?: boolean
 }) {
 	const theme = useTheme()
 	const fill = computeViewportFill({
@@ -143,6 +168,7 @@ function FixtureCard({
 		boardWidth: fixture.width,
 		cellCount: fixture.initialCells,
 	})
+	const initialScroll = fill.boardHeight > DENSITY_REFERENCE_VIEWPORT_HEIGHT
 
 	return (
 		<Pressable
@@ -160,17 +186,23 @@ function FixtureCard({
 			testID={`density-${fixture.id}`}
 		>
 			<Text style={[styles.cardTitle, { color: theme.colors.text }]}>
-				{fixture.label}
+				{compact
+					? `${fixture.width}×${fixture.targetRows} · ${fixture.initialCells}`
+					: fixture.label}
 				{busy ? '…' : ''}
 			</Text>
-			<Text style={[styles.cardMeta, { color: theme.colors.textMuted }]}>
-				{fixture.width}×{fixture.targetRows} · {fixture.initialCells} клеток ·
-				ячейка ~{fill.cellSize}dp · fill ~{fill.viewportFillPercent}%
-			</Text>
-			<Text style={[styles.cardMeta, { color: theme.colors.textMuted }]}>
-				ходы {fixture.initialLegalMoves} · глубина {fixture.solutionDepth} ·
-				добавл. {fixture.appendCount}
-			</Text>
+			{!compact ? (
+				<Text style={[styles.cardMeta, { color: theme.colors.textMuted }]}>
+					{fixture.width}×{fixture.targetRows} · {fixture.initialCells} клеток ·
+					ячейка ~{fill.cellSize}dp · fill ~{fill.viewportFillPercent}%
+					{initialScroll ? ' · scroll' : ''}
+				</Text>
+			) : (
+				<Text style={[styles.cardMeta, { color: theme.colors.textMuted }]}>
+					fill ~{fill.viewportFillPercent}% · ячейка {fill.cellSize}dp
+					{initialScroll ? ' · нужен scroll' : ''}
+				</Text>
+			)}
 		</Pressable>
 	)
 }
@@ -190,6 +222,12 @@ const styles = StyleSheet.create({
 		...typography.caption,
 		textAlign: 'center',
 		marginBottom: spacing.sm,
+	},
+	section: {
+		...typography.caption,
+		fontWeight: '700',
+		marginTop: spacing.md,
+		letterSpacing: 0.4,
 	},
 	card: {
 		borderWidth: StyleSheet.hairlineWidth,

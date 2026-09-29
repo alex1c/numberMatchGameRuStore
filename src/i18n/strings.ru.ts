@@ -82,4 +82,8 @@ export const strings = {
 		'Сравнение плотности поля. Не кампания — прогресс не меняется.',
 	densityLabEntry: 'Density Lab',
 	densityLabBack: 'В Density Lab',
+	densityLabV2Section: '8 columns — vertical fill',
+	densityLabV2Note:
+		'Ширина 8 уже удобна на OPPO. Сравните высоту: 6→10 рядов.',
+	densityLabV1Section: 'V1 reference (width survey)',
 } as const

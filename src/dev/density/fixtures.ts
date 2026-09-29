@@ -1,11 +1,13 @@
 /**
- * AUTO-GENERATED density calibration fixtures — DEV experiment only.
- * Rebuild candidates with: npx tsx src/dev/density/searchCli.ts
+ * Density calibration fixtures — DEV experiment only.
+ * V1 width survey + V2 8-column vertical fill.
+ * Rebuild V2 candidates: npx tsx src/dev/density/searchV2Cli.ts
  * Does NOT affect Campaign v1 / generationVersion.
  */
 
-import type { DensityFixtureMeta } from './types'
+import type { DensityFixtureId, DensityFixtureMeta } from './types'
 
+/** Full catalog (V1 reference + V2 vertical). */
 export const DENSITY_FIXTURES: readonly DensityFixtureMeta[] = [
 	{
 		id: 'density-current',
@@ -41,7 +43,7 @@ export const DENSITY_FIXTURES: readonly DensityFixtureMeta[] = [
 		appendCount: 1,
 		maxRowsDuringSolution: 5,
 		difficultyScore: 133.1,
-		note: 'experimental 7×5 dense EASY-ish (~35 target, even cells)',
+		note: 'V1 reference 7×5',
 	},
 	{
 		id: 'density-7x6',
@@ -59,7 +61,7 @@ export const DENSITY_FIXTURES: readonly DensityFixtureMeta[] = [
 		appendCount: 0,
 		maxRowsDuringSolution: 6,
 		difficultyScore: 177.24,
-		note: 'experimental 7×6 dense EASY-ish',
+		note: 'V1 reference 7×6',
 	},
 	{
 		id: 'density-8x5',
@@ -77,8 +79,9 @@ export const DENSITY_FIXTURES: readonly DensityFixtureMeta[] = [
 		appendCount: 0,
 		maxRowsDuringSolution: 5,
 		difficultyScore: 155.7,
-		note: 'experimental 8×5 dense EASY-ish',
+		note: 'V1 reference 8×5',
 	},
+	// V2 primary comparison — keep OPPO-tested 8×6 identity from V1.
 	{
 		id: 'density-8x6',
 		label: '8 × 6 — 48 чисел',
@@ -95,7 +98,79 @@ export const DENSITY_FIXTURES: readonly DensityFixtureMeta[] = [
 		appendCount: 0,
 		maxRowsDuringSolution: 6,
 		difficultyScore: 229.25,
-		note: 'experimental 8×6 dense (higher score from size; still many openings)',
+		note: 'V2 baseline — OPPO liked width 8; still wants more vertical fill',
+	},
+	{
+		id: 'density-8x7',
+		label: '8 × 7 — 56 чисел',
+		width: 8,
+		targetRows: 7,
+		initialCells: 56,
+		seed: 8007001,
+		kind: 'experimental-shape',
+		fingerprint: 'f952eb99f',
+		solutionDepth: 30,
+		initialLegalMoves: 48,
+		choiceStates: 24,
+		forcedRatio: 0.2,
+		appendCount: 1,
+		maxRowsDuringSolution: 7,
+		difficultyScore: 234.7,
+		note: 'V2 vertical 8×7',
+	},
+	{
+		id: 'density-8x8',
+		label: '8 × 8 — 64 числа',
+		width: 8,
+		targetRows: 8,
+		initialCells: 64,
+		seed: 3436997684,
+		kind: 'experimental-shape',
+		fingerprint: 'f90b235b1',
+		solutionDepth: 36,
+		initialLegalMoves: 56,
+		choiceStates: 32,
+		forcedRatio: 0.1111111111111111,
+		appendCount: 1,
+		maxRowsDuringSolution: 8,
+		difficultyScore: 300.13,
+		note: 'V2 vertical 8×8',
+	},
+	{
+		id: 'density-8x9',
+		label: '8 × 9 — 72 числа',
+		width: 8,
+		targetRows: 9,
+		initialCells: 72,
+		seed: 1021913243,
+		kind: 'experimental-shape',
+		fingerprint: 'f6d25f28d',
+		solutionDepth: 40,
+		initialLegalMoves: 69,
+		choiceStates: 37,
+		forcedRatio: 0.075,
+		appendCount: 1,
+		maxRowsDuringSolution: 9,
+		difficultyScore: 336.05,
+		note: 'V2 vertical 8×9',
+	},
+	{
+		id: 'density-8x10',
+		label: '8 × 10 — 80 чисел',
+		width: 8,
+		targetRows: 10,
+		initialCells: 80,
+		seed: 3049722727,
+		kind: 'experimental-shape',
+		fingerprint: 'fe79aa427',
+		solutionDepth: 44,
+		initialLegalMoves: 50,
+		choiceStates: 41,
+		forcedRatio: 0.06818181818181818,
+		appendCount: 1,
+		maxRowsDuringSolution: 10,
+		difficultyScore: 342.99,
+		note: 'V2 vertical 8×10',
 	},
 	{
 		id: 'density-9x4',
@@ -113,7 +188,7 @@ export const DENSITY_FIXTURES: readonly DensityFixtureMeta[] = [
 		appendCount: 0,
 		maxRowsDuringSolution: 4,
 		difficultyScore: 155.23,
-		note: 'experimental 9×4 wide short',
+		note: 'V1 reference 9×4 (width rejected for now)',
 	},
 	{
 		id: 'density-9x5',
@@ -131,6 +206,25 @@ export const DENSITY_FIXTURES: readonly DensityFixtureMeta[] = [
 		appendCount: 0,
 		maxRowsDuringSolution: 5,
 		difficultyScore: 182.58,
-		note: 'experimental 9×5 dense (~45 target, even cells)',
+		note: 'V1 reference 9×5 (width rejected for now)',
 	},
 ] as const
+
+/** Primary OPPO comparison set — fixed width 8, vary rows only. */
+export const DENSITY_V2_VERTICAL_IDS: readonly DensityFixtureId[] = [
+	'density-8x6',
+	'density-8x7',
+	'density-8x8',
+	'density-8x9',
+	'density-8x10',
+] as const
+
+export function getDensityV2VerticalFixtures(): readonly DensityFixtureMeta[] {
+	return DENSITY_V2_VERTICAL_IDS.map((id) => {
+		const found = DENSITY_FIXTURES.find((f) => f.id === id)
+		if (!found) {
+			throw new Error(`Missing V2 fixture ${id}`)
+		}
+		return found
+	})
+}

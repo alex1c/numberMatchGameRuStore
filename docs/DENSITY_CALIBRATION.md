@@ -1,4 +1,4 @@
-# Board density calibration (PHASE 5A)
+# Board density calibration (PHASE 5A / V2)
 
 **Status:** DEV EXPERIMENT — NO PRODUCTION DECISION YET.
 
@@ -10,106 +10,103 @@
 >
 > **Difficulty and visual density are separate dimensions.**
 
+## Physical evidence so far (OPPO)
+
+- User tested Density Lab V1 on physical OPPO.
+- **Width 8 × 6 rows (48 cells)** felt clearly better than sparse current EASY.
+- Digits readable; cells tappable; horizontal density comfortable.
+- **9-column is unnecessary for now.**
+- **8×6 still leaves too much unused vertical gameplay space.**
+- Next decision is **rows only** at fixed width **8**.
+
 ## What this is
 
-A DEV-only **Density Lab** with seven solver-proven boards so physical OPPO play
-can choose a density feel. Campaign v1 (`cs6e442b58`) is untouched.
+DEV-only **Density Lab**:
+
+- **V2 (primary):** `8×6` … `8×10` — vertical fill comparison
+- **V1 (reference):** width survey (5/7/8/9) kept below the fold
+
+Campaign v1 (`cs6e442b58`) is untouched.
 
 ## How to open
 
-Home → DEV → **Density Lab** (only when `__DEV__ === true`).
+Home → DEV → **Density Lab** (`__DEV__` only).
 
-Sessions are non-persistent DEV fixtures (same isolation as playtest fixtures).
+Sessions are non-persistent DEV fixtures.
 
 ## Cell size formula (unchanged production)
 
-From `computeBoardLayout(availableWidth, boardWidth)`:
+`computeBoardLayout(availableWidth, boardWidth)`:
 
-- gap = 4dp between columns
-- raw = floor((availableWidth − gaps) / cols)
-- cellSize = clamp(raw, **min 36**, **max 56**)
-- side margins absorb leftover width symmetrically
+- gap = 4dp
+- cellSize = clamp(floor((width − gaps) / cols), **36**, **56**)
+- symmetric side margins
 
-Reference content width in this doc: `360 − 2×16 = 328`dp  
-Reference board viewport height: **520**dp (header/status/controls reserved).
+Reference content width: **328**dp · reference board viewport: **520**dp.
 
-## Variants (frozen seeds)
+## V2 — 8 columns vertical fill (primary)
 
-| ID | Width | Rows | Cells | Seed | FP | Depth | Open | App | Score | Cell dp* | Board H* | Fill %* |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| density-current | 5 | 3 | 15 | 10000 | fd71cf927 | 9 | 8 | 1 | 63.5 | 56 | 176 | 33.8 |
-| density-7x5 | 7 | 5 | 34 | 3401073915 | f0bccf69f | 20 | 18 | 1 | 133.1 | 43 | 231 | 44.4 |
-| density-7x6 | 7 | 6 | 42 | 2387170673 | fc7c57c84 | 21 | 45 | 0 | 177.2 | 43 | 278 | 53.5 |
-| density-8x5 | 8 | 5 | 40 | 4211548598 | fa06408a5 | 20 | 23 | 0 | 155.7 | 37 | 201 | 38.7 |
-| density-8x6 | 8 | 6 | 48 | 2684023931 | ffbc8a6fd | 24 | 71 | 0 | 229.3 | 37 | 242 | 46.5 |
-| density-9x4 | 9 | 4 | 36 | 1762541388 | f0dd11d5c | 18 | 34 | 0 | 155.2 | 36 | 156 | 30.0 |
-| density-9x5 | 9 | 5 | 44 | 3346570985 | fad7d2686 | 22 | 25 | 0 | 182.6 | 36 | 196 | 37.7 |
+| Variant | Cells | Cell dp | Board height | Fill % | Opening | Depth | Appends | Max rows | Initial scroll |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 8×6 | 48 | 37 | 242 | 46.5 | 71 | 24 | 0 | 6 | NO |
+| 8×7 | 56 | 37 | 283 | 54.4 | 48 | 30 | 1 | 7 | NO |
+| 8×8 | 64 | 37 | 324 | 62.3 | 56 | 36 | 1 | 8 | NO |
+| 8×9 | 72 | 37 | 365 | 70.2 | 69 | 40 | 1 | 9 | NO |
+| 8×10 | 80 | 37 | 406 | 78.1 | 50 | 44 | 1 | 10 | NO |
 
-\*Reference layout math (`DENSITY_REFERENCE_*`). Physical OPPO may differ slightly.
+All widths exact **8**; cell counts exact **width × rows** (no partial final row).
 
-Notes:
+Touch/readability: cell ~37dp (same across V2). No horizontal overflow at reference width.
+Post-Add scroll risk rises with taller starts (especially 8×9 / 8×10) — judge on OPPO.
 
-- 7×5 uses **34** cells (even pairing); 9×5 uses **44** (same reason).
-- Algorithmic “score” rises with board size even when openings are plentiful —
-  that does **not** mean the board plays like EXPERT. See easy-dense proof below.
+**Do not choose a winner in docs** — OPPO decides.
 
-## Technical fit flags (reference)
+### Frozen seeds (V2)
 
-| ID | H overflow | Initial scroll | Post-Add scroll risk | Touch risk | Readability |
-| --- | --- | --- | --- | --- | --- |
-| density-current | NO | NO | low | low (large tiles) | high |
-| density-7x5 | NO | NO | low–med | low | high |
-| density-7x6 | NO | NO | med | low | high |
-| density-8x5 | NO | NO | low–med | watch (~37dp) | good |
-| density-8x6 | NO | NO | med | watch | good |
-| density-9x4 | NO | NO | low | higher (~36dp min) | watch |
-| density-9x5 | NO | NO | med | higher | watch |
+| ID | Seed | Fingerprint |
+| --- | ---: | --- |
+| density-8x6 | 2684023931 | ffbc8a6fd (OPPO-tested V1 identity kept) |
+| density-8x7 | 8007001 | f952eb99f |
+| density-8x8 | 3436997684 | f90b235b1 |
+| density-8x9 | 1021913243 | f6d25f28d |
+| density-8x10 | 3049722727 | fe79aa427 |
 
-## Easy-dense proof
+## V1 width survey (reference only)
 
-| | CURRENT EASY | 8×5 dense |
-| --- | --- | --- |
-| cells | 15 | 40 |
-| openings | 8 | 23 |
-| depth | 9 | 20 |
-| choiceStates | 6 | 18 |
-| appends | 1 | 0 |
-| score | 63.5 | 155.7 |
+| ID | Width | Rows | Cells | Fill %* |
+| --- | ---: | ---: | ---: | ---: |
+| density-current | 5 | 3 | 15 | 33.8 |
+| density-7x5 | 7 | 5 | 34 | 44.4 |
+| density-7x6 | 7 | 6 | 42 | 53.5 |
+| density-8x5 | 8 | 5 | 40 | 38.7 |
+| density-9x4 | 9 | 4 | 36 | 30.0 |
+| density-9x5 | 9 | 5 | 44 | 37.7 |
 
-Conclusion for calibration only: **a denser board can still offer many openings
-and ≤1 append** — visual fullness ≠ algorithmic EXPERT. Final width/row choice
-is reserved for OPPO judgment.
+\*Reference layout. 9×4 shows many cells can still look vertically sparse.
 
-## Rebuild tooling
+## Easy-dense proof (unchanged insight)
+
+CURRENT 15 cells / 8 openings vs 8×5 40 cells / 23 openings (0 append):
+visual fullness ≠ algorithmic EXPERT.
+
+## Tooling
 
 ```bash
-npx tsx src/dev/density/searchCli.ts
+npx tsx src/dev/density/searchV2Cli.ts
 ```
 
 Does not mutate Campaign catalog.
 
-## Physical comparison order
+## Physical V2 order
 
-1. CURRENT  
-2. 7×5  
-3. 7×6  
-4. 8×5  
-5. 8×6  
-6. 9×4  
-7. 9×5  
+1. 8×6
+2. 8×7
+3. 8×8
+4. 8×9
+5. 8×10
 
-Sample each ~30–90s (3–5 matches). Do not require completing all seven.
+Sample each ~30–90s. Mark: пустовато / нормально / тесно · Лучший: …
 
-## Questions for OPPO
+## Non-goals
 
-- Which looks most like a proper full Number Match board?
-- At which width do numbers become uncomfortable?
-- Which feels interesting without overcrowding?
-- Prefer fixed width throughout Campaign, or gradual widening?
-
-Report simply: `пустовато / нормально / тесно` per variant + best pick.
-
-## Non-goals (this checkpoint)
-
-No Campaign rebuild, no generationVersion bump, no profile changes,
-no ghost numbers, no Training enlargement.
+No Campaign rebuild, no generationVersion bump, no profile changes, no ghost numbers.
