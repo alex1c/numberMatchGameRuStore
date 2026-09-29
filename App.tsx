@@ -1,50 +1,95 @@
 /**
  * Application shell.
  * Layout contract: CONTENT → BANNER (when reserved) → SAFE AREA inset.
- * No magic bottom offsets; no device-specific translate hacks.
+ * Provider order: SafeArea → Theme → AppState → GameSession → shell.
  */
 
-import { type ReactElement } from 'react'
+import { useEffect, useRef, type ReactElement } from 'react'
 import { StatusBar } from 'expo-status-bar'
 import { StyleSheet, View } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 
+import { AppStateProvider, useAppState } from './src/app'
 import { BannerSlot } from './src/components/BannerSlot'
-import { useAppNavigation } from './src/navigation'
-import { GameSessionProvider } from './src/game/session/GameSessionContext'
+import { TrainingScreen } from './src/features/training'
+import { GameSessionProvider, useGameSession } from './src/game/session/GameSessionContext'
+import { useAppNavigation, type AppRouteName } from './src/navigation'
 import { GameScreen } from './src/screens/GameScreen'
 import { HomeScreen } from './src/screens/HomeScreen'
+import { LevelsScreen } from './src/screens/LevelsScreen'
 import { PlaceholderScreen } from './src/screens/PlaceholderScreen'
 import { ThemeProvider, useTheme } from './src/theme'
-import type { AppRouteName } from './src/navigation'
 
 const PLACEHOLDER_COPY: Partial<
 	Record<AppRouteName, { title: string; note?: string }>
 > = {
-	levels: { title: 'Levels', note: 'Campaign levels arrive later.' },
-	daily: { title: 'Daily', note: 'Daily mode arrives later.' },
-	statistics: { title: 'Statistics' },
-	achievements: { title: 'Achievements' },
-	settings: { title: 'Settings' },
-	training: {
-		title: 'Правила',
-		note:
-			'Интерактивное обучение — Phase 5. Сейчас: числа совпадают если равны или в сумме дают 10; путь по горизонтали/вертикали/диагонали или через конец строки; пустые клетки между допустимы; Добавить — когда нет ходов.',
-	},
+	daily: { title: 'Ежедневная', note: 'Режим появится позже.' },
+	statistics: { title: 'Статистика' },
+	achievements: { title: 'Достижения' },
+	settings: { title: 'Настройки' },
 	about: {
-		title: 'About',
-		note: 'Other our apps link will be configured before release.',
+		title: 'О приложении',
+		note: 'Ссылка на другие наши приложения будет настроена перед релизом.',
 	},
 }
 
 /**
+ * Restores persisted campaign session into GameSession once after hydrate.
+ */
+function SessionRestoreBridge({ children }: { readonly children: ReactElement }) {
+	const { buildRestoredGameSession, activeSession, markCampaignSession } =
+		useAppState()
+	const { restoreSession, hasSession } = useGameSession()
+	const restored = useRef(false)
+
+	useEffect(() => {
+		if (restored.current || hasSession) {
+			return
+		}
+		if (!activeSession) {
+			restored.current = true
+			return
+		}
+		const state = buildRestoredGameSession()
+		if (state) {
+			restoreSession(state)
+			markCampaignSession()
+		}
+		restored.current = true
+	}, [
+		activeSession,
+		buildRestoredGameSession,
+		hasSession,
+		markCampaignSession,
+		restoreSession,
+	])
+
+	return children
+}
+
+/**
  * Single navigation owner so banner policy and screens share one stack.
- * Training and Game do not reserve banner geometry (gameplay decision: no sticky banner).
+ * Initial route is decided once by AppState after hydrate (training vs home).
  */
 function AppShell() {
 	const theme = useTheme()
-	const nav = useAppNavigation('home')
+	const { initialRoute, startCampaignLevel, trainingCompleted } = useAppState()
+	const { startSession } = useGameSession()
+	const nav = useAppNavigation(initialRoute)
 	const showBanner = nav.current !== 'training' && nav.current !== 'game'
+
+	const startLevel1FromTraining = async () => {
+		const result = await startCampaignLevel(1, 'progression')
+		if (!result.ok || !result.identity || !result.board) {
+			nav.goHome()
+			return
+		}
+		startSession(result.identity, result.board, {
+			undoAfterCompletion: false,
+		})
+		// Replace so Back from Game → Home (not Training).
+		nav.replace('game')
+	}
 
 	let screen: ReactElement = <HomeScreen onNavigate={nav.navigate} />
 	if (nav.current === 'game') {
@@ -52,6 +97,24 @@ function AppShell() {
 			<GameScreen
 				onHome={nav.goHome}
 				onTraining={() => nav.navigate('training')}
+				onReplaceGame={() => nav.replace('game')}
+			/>
+		)
+	} else if (nav.current === 'levels') {
+		screen = (
+			<LevelsScreen
+				onHome={nav.goHome}
+				onOpenGame={() => nav.navigate('game')}
+			/>
+		)
+	} else if (nav.current === 'training') {
+		screen = (
+			<TrainingScreen
+				onHome={nav.goHome}
+				onStartCampaign={() => {
+					void startLevel1FromTraining()
+				}}
+				isReplay={trainingCompleted}
 			/>
 		)
 	} else if (nav.current !== 'home') {
@@ -95,9 +158,13 @@ export default function App() {
 	return (
 		<SafeAreaProvider>
 			<ThemeProvider>
-				<GameSessionProvider>
-					<AppShell />
-				</GameSessionProvider>
+				<AppStateProvider>
+					<GameSessionProvider>
+						<SessionRestoreBridge>
+							<AppShell />
+						</SessionRestoreBridge>
+					</GameSessionProvider>
+				</AppStateProvider>
 			</ThemeProvider>
 		</SafeAreaProvider>
 	)

@@ -1,6 +1,6 @@
 /**
- * Production-quality playable Game screen (PHASE 4).
- * Layout: SAFE TOP → HEADER → META → BOARD (flex/scroll) → STATUS → CONTROLS → SAFE BOTTOM
+ * Production Game screen (PHASE 5 campaign flow).
+ * Layout: SAFE TOP → HEADER → META → BOARD → STATUS → CONTROLS → SAFE BOTTOM
  * Default: no Game banner. DEV may toggle reserve slot for measurement.
  */
 
@@ -13,6 +13,8 @@ import {
 	View,
 } from 'react-native'
 
+import { useAppState } from '../app'
+import { CAMPAIGN_LEVEL_COUNT } from '../game/campaign'
 import { BannerSlot } from '../components/BannerSlot'
 import { CompletionOverlay } from '../components/game/CompletionOverlay'
 import { GameControls } from '../components/game/GameControls'
@@ -25,27 +27,54 @@ import { BANNER_SLOT_HEIGHT, spacing, typography, useTheme } from '../theme'
 interface GameScreenProps {
 	readonly onHome: () => void
 	readonly onTraining: () => void
+	/** Replace top route with game (Next / Replay stay on one Game screen). */
+	readonly onReplaceGame?: () => void
 }
 
 /**
  * DEV-only geometry experiment. Production always false — no empty 50px hole.
  */
 const DEV_GAME_BANNER_EXPERIMENT =
-	typeof __DEV__ !== 'undefined' && __DEV__
-		? false
-		: false
+	typeof __DEV__ !== 'undefined' && __DEV__ ? false : false
 
-export function GameScreen({ onHome, onTraining }: GameScreenProps) {
+export function GameScreen({
+	onHome,
+	onTraining,
+	onReplaceGame,
+}: GameScreenProps) {
 	const theme = useTheme()
-	const { session, dispatch, requestHint, isDirty } = useGameSession()
+	const {
+		session,
+		dispatch,
+		requestHint,
+		isDirty,
+		startSession,
+	} = useGameSession()
+	const {
+		activeSession,
+		sessionSource,
+		syncSessionFromGameplay,
+		commitProgressionCompletion,
+		commitReplayCompletion,
+		startCampaignLevel,
+	} = useAppState()
+
 	const [dismissedCompletionKey, setDismissedCompletionKey] = useState<
 		string | null
 	>(null)
 	const [scrollToEndToken, setScrollToEndToken] = useState(0)
 	const [showBannerSlot, setShowBannerSlot] = useState(DEV_GAME_BANNER_EXPERIMENT)
 	const [showDevCoords, setShowDevCoords] = useState(false)
+	const [nextBusy, setNextBusy] = useState(false)
 	const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const completionCommitted = useRef<string | null>(null)
+	const lastSyncedKey = useRef<string | null>(null)
+	const nextGuard = useRef(false)
+
+	const isCampaign = sessionSource === 'campaign' && activeSession !== null
+	const campaignLevel = activeSession?.level ?? null
+	const campaignPurpose = activeSession?.purpose ?? null
 
 	useEffect(() => {
 		return () => {
@@ -84,8 +113,68 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 		}, 1600)
 	}, [session?.hintIndices, dispatch, session])
 
+	// Sync meaningful gameplay to persistence (not SELECT_CELL-only).
+	useEffect(() => {
+		if (!session || !isCampaign) {
+			return
+		}
+		const key = [
+			session.board.nextCellSeq,
+			session.board.cells.filter((c) => c.removed).length,
+			session.history.length,
+			session.counters.matchesRemoved,
+			session.counters.appendActions,
+			session.counters.undoActions,
+			session.completed ? '1' : '0',
+		].join(':')
+		if (key === lastSyncedKey.current) {
+			return
+		}
+		// Skip pristine fresh start (nothing to persist beyond initial write).
+		if (
+			session.history.length === 0 &&
+			session.counters.matchesRemoved === 0 &&
+			session.counters.appendActions === 0 &&
+			!session.completed
+		) {
+			lastSyncedKey.current = key
+			return
+		}
+		lastSyncedKey.current = key
+		void syncSessionFromGameplay(session)
+	}, [isCampaign, session, syncSessionFromGameplay])
+
+	// Commit campaign completion once (idempotent).
+	useEffect(() => {
+		if (!session?.completed || !isCampaign || !campaignLevel) {
+			return
+		}
+		const commitKey = `${campaignPurpose}:${campaignLevel}:${session.identity.fingerprint}`
+		if (completionCommitted.current === commitKey) {
+			return
+		}
+		completionCommitted.current = commitKey
+		if (campaignPurpose === 'progression') {
+			void commitProgressionCompletion(campaignLevel, session)
+		} else if (campaignPurpose === 'replay') {
+			void commitReplayCompletion(campaignLevel, session)
+		}
+	}, [
+		campaignLevel,
+		campaignPurpose,
+		commitProgressionCompletion,
+		commitReplayCompletion,
+		isCampaign,
+		session,
+	])
+
 	const confirmRestart = useCallback(() => {
 		if (!session) {
+			return
+		}
+		// After campaign completion — no restart-loss warning; restart still allowed
+		// from menu only while in_progress. Overlay hides restart for campaign done.
+		if (session.completed && isCampaign) {
 			return
 		}
 		if (!isDirty && session.history.length === 0) {
@@ -100,7 +189,7 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 				onPress: () => dispatch({ type: 'RESTART' }),
 			},
 		])
-	}, [dispatch, isDirty, session])
+	}, [dispatch, isCampaign, isDirty, session])
 
 	const handleAppend = useCallback(() => {
 		dispatch({ type: 'APPEND' })
@@ -113,6 +202,70 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 		},
 		[dispatch],
 	)
+
+	const handleNext = useCallback(async () => {
+		if (nextGuard.current || nextBusy || !campaignLevel || !session) {
+			return
+		}
+		nextGuard.current = true
+		setNextBusy(true)
+		try {
+			// Ensure progression commit finished before unlocking N+1 (idempotent).
+			await commitProgressionCompletion(campaignLevel, session)
+			const nextLevel = campaignLevel + 1
+			if (nextLevel > CAMPAIGN_LEVEL_COUNT) {
+				onHome()
+				return
+			}
+			const result = await startCampaignLevel(nextLevel, 'progression')
+			if (!result.ok || !result.identity || !result.board) {
+				Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
+				return
+			}
+			completionCommitted.current = null
+			lastSyncedKey.current = null
+			setDismissedCompletionKey(null)
+			startSession(result.identity, result.board, {
+				undoAfterCompletion: false,
+			})
+			onReplaceGame?.()
+		} finally {
+			setNextBusy(false)
+			nextGuard.current = false
+		}
+	}, [
+		campaignLevel,
+		commitProgressionCompletion,
+		nextBusy,
+		onHome,
+		onReplaceGame,
+		session,
+		startCampaignLevel,
+		startSession,
+	])
+
+	const handleReplay = useCallback(async () => {
+		if (nextGuard.current || !campaignLevel) {
+			return
+		}
+		nextGuard.current = true
+		try {
+			const result = await startCampaignLevel(campaignLevel, 'replay')
+			if (!result.ok || !result.identity || !result.board) {
+				Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
+				return
+			}
+			completionCommitted.current = null
+			lastSyncedKey.current = null
+			setDismissedCompletionKey(null)
+			startSession(result.identity, result.board, {
+				undoAfterCompletion: false,
+			})
+			onReplaceGame?.()
+		} finally {
+			nextGuard.current = false
+		}
+	}, [campaignLevel, onReplaceGame, startCampaignLevel, startSession])
 
 	if (!session) {
 		return (
@@ -141,10 +294,35 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 	const showCompletion =
 		completionKey !== null && completionKey !== dismissedCompletionKey
 
-	const shortFp =
-		session.identity.fingerprint.length > 10
-			? session.identity.fingerprint.slice(0, 10)
-			: session.identity.fingerprint
+	const undoAllowedAfterCompletion =
+		session.undoAfterCompletion !== false && !isCampaign
+
+	const headerTitle = isCampaign && campaignLevel
+		? strings.levelHeader(campaignLevel)
+		: strings.appName
+	const headerSubtitle = isCampaign
+		? __DEV__
+			? `${session.identity.profile} · seed ${session.identity.seed}`
+			: undefined
+		: `${session.identity.label}`
+
+	const showNext =
+		isCampaign &&
+		campaignPurpose === 'progression' &&
+		campaignLevel !== null &&
+		campaignLevel < CAMPAIGN_LEVEL_COUNT &&
+		session.completed
+
+	const completionTitle =
+		isCampaign && campaignLevel
+			? strings.levelCompletedTitle(campaignLevel)
+			: strings.completedTitle
+
+	const completionMode = !isCampaign
+		? 'dev'
+		: campaignPurpose === 'replay'
+			? 'campaign_replay'
+			: 'campaign_progression'
 
 	return (
 		<View
@@ -152,22 +330,22 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 			testID="game-screen"
 		>
 			<GameHeader
-				title={strings.appName}
-				subtitle={`${session.identity.label} · ${shortFp}`}
+				title={headerTitle}
+				subtitle={headerSubtitle}
 				onBack={onHome}
 				onRestart={confirmRestart}
 				onRules={onTraining}
 				onHome={onHome}
 			/>
 
-			<View style={styles.meta}>
-				<Text style={[styles.metaText, { color: theme.colors.textMuted }]}>
-					{session.identity.profile} · seed {session.identity.seed}
-					{__DEV__
-						? ` · ${session.counters.matchesRemoved}п/${session.counters.appendActions}+`
-						: ''}
-				</Text>
-			</View>
+			{__DEV__ && !isCampaign ? (
+				<View style={styles.meta}>
+					<Text style={[styles.metaText, { color: theme.colors.textMuted }]}>
+						{session.identity.profile} · seed {session.identity.seed}
+						{` · ${session.counters.matchesRemoved}п/${session.counters.appendActions}+`}
+					</Text>
+				</View>
+			) : null}
 
 			<NumberBoard
 				board={session.board}
@@ -228,19 +406,37 @@ export function GameScreen({ onHome, onTraining }: GameScreenProps) {
 
 			<CompletionOverlay
 				visible={showCompletion}
-				profileLabel={String(session.identity.label)}
+				title={completionTitle}
+				body={
+					isCampaign && campaignLevel === CAMPAIGN_LEVEL_COUNT
+						? strings.campaignComplete
+						: strings.completedBody
+				}
 				counters={session.counters}
-				canUndo={session.history.length > 0}
-				onUndo={() => {
-					dispatch({ type: 'UNDO' })
+				mode={completionMode}
+				showNext={showNext}
+				nextLabel={
+					campaignLevel === CAMPAIGN_LEVEL_COUNT
+						? strings.campaignComplete
+						: strings.nextLevel
+				}
+				nextBusy={nextBusy}
+				onNext={showNext ? () => void handleNext() : undefined}
+				onReplay={isCampaign ? () => void handleReplay() : undefined}
+				onHome={() => {
+					onHome()
 				}}
-				onRestart={confirmRestart}
-				onHome={onHome}
 				onClose={() => {
 					if (completionKey) {
 						setDismissedCompletionKey(completionKey)
 					}
 				}}
+				canUndo={
+					undoAllowedAfterCompletion && session.history.length > 0
+				}
+				onUndo={() => dispatch({ type: 'UNDO' })}
+				showRestart={!isCampaign}
+				onRestart={confirmRestart}
 			/>
 		</View>
 	)

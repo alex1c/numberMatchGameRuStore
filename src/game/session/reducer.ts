@@ -62,6 +62,37 @@ export function createGameSession(
 	}
 }
 
+/**
+ * Restore a full gameplay session from persistence (board + history + counters).
+ * Used on cold start when an in-progress / completed campaign session exists.
+ */
+export function hydrateGameSession(input: {
+	readonly identity: SessionPuzzleIdentity
+	readonly board: BoardState
+	readonly initialBoard: BoardState
+	readonly history?: readonly BoardState[]
+	readonly counters?: SessionCounters
+	readonly completed?: boolean
+}): GameSessionState {
+	const board = cloneBoard(input.board)
+	const completed = input.completed ?? isBoardCleared(board)
+	return {
+		identity: input.identity,
+		initialBoard: cloneBoard(input.initialBoard),
+		board,
+		selectedIndex: null,
+		invalidIndices: [],
+		hintIndices: [],
+		history: (input.history ?? []).map(cloneBoard),
+		counters: input.counters ?? EMPTY_COUNTERS,
+		completed,
+		hasAvailableMoves: hasAvailableMoves(board),
+		interactionLocked: false,
+		statusMessage: completed ? 'cleared' : null,
+		hintBusy: false,
+	}
+}
+
 export function reduceGameSession(
 	state: GameSessionState,
 	action: GameSessionAction,

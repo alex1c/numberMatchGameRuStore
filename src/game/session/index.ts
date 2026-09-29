@@ -10,7 +10,7 @@ export {
 	type SessionPuzzleIdentity,
 } from './types'
 
-export { createGameSession, reduceGameSession } from './reducer'
+export { createGameSession, hydrateGameSession, reduceGameSession } from './reducer'
 
 export { GameSessionProvider, useGameSession } from './GameSessionContext'
 

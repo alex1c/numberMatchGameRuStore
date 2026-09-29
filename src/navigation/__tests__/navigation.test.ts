@@ -4,6 +4,7 @@
 
 import {
 	pushRoute,
+	replaceRoute,
 	resolveBackTarget,
 	routeToBannerPlacement,
 } from '../types'
@@ -35,5 +36,16 @@ describe('navigation foundation', () => {
 	it('pushRoute avoids duplicate top entries', () => {
 		const stack = pushRoute([{ name: 'home' }], { name: 'levels' })
 		expect(pushRoute(stack, { name: 'levels' })).toEqual(stack)
+	})
+
+	it('replaceRoute swaps the top without growing the stack', () => {
+		const stack = [{ name: 'home' as const }, { name: 'training' as const }]
+		expect(replaceRoute(stack, { name: 'game' })).toEqual([
+			{ name: 'home' },
+			{ name: 'game' },
+		])
+		expect(replaceRoute([{ name: 'home' }], { name: 'training' })).toEqual([
+			{ name: 'training' },
+		])
 	})
 })

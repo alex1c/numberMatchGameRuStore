@@ -1,6 +1,6 @@
 /**
- * Centralized Russian user-facing strings (PHASE 4).
- * Not a full i18n framework — simple constant map.
+ * Centralized Russian user-facing strings (PHASE 5).
+ * Not a full i18n framework — simple constant map + helpers.
  */
 
 export const strings = {
@@ -8,10 +8,11 @@ export const strings = {
 	back: 'Назад',
 	home: 'На главную',
 	continue: 'Продолжить',
-	playEasy: 'EASY',
-	playMedium: 'MEDIUM',
-	playHard: 'HARD',
-	playExpert: 'EXPERT',
+	play: 'Играть',
+	levels: 'Уровни',
+	levelsTitle: 'Уровни',
+	training: 'Обучение',
+	loading: 'Загрузка…',
 	undo: 'Отменить',
 	addNumbers: 'Добавить',
 	addNumbersA11y: 'Добавить числа',
@@ -19,16 +20,23 @@ export const strings = {
 	restart: 'Перезапустить',
 	rules: 'Правила',
 	cancel: 'Отмена',
+	nextLevel: 'Следующий уровень',
+	repeatLevel: 'Повторить',
+	campaignComplete: 'Кампания пройдена',
+	errorTitle: 'Ошибка',
+	errorGeneric: 'Не удалось начать уровень',
 	restartConfirmTitle: 'Начать заново?',
 	restartConfirmBody:
 		'Начать эту головоломку заново? Текущий прогресс будет потерян.',
 	restartConfirmOk: 'Начать заново',
-	replaceConfirmTitle: 'Новая головоломка?',
+	/** §451 — replace unfinished dirty session. */
+	replaceConfirmTitle: 'Заменить текущую игру?',
 	replaceConfirmBody:
-		'Начать другую головоломку? Текущий прогресс будет потерян.',
+		'У вас есть незавершённый уровень. Начать другой? Прогресс текущей игры будет потерян.',
 	replaceConfirmOk: 'Начать',
 	completedTitle: 'Готово!',
 	completedBody: 'Поле очищено',
+	levelCompletedTitle: (level: number) => `Уровень ${level} пройден`,
 	matches: 'Пары',
 	appends: 'Добавления',
 	undos: 'Отмены',
@@ -41,7 +49,32 @@ export const strings = {
 	statusStuck: 'Нет ходов — добавьте числа',
 	statusCleared: 'Поле очищено',
 	devFixtures: 'DEV fixtures',
-	homeSubtitle: 'Playtest · Phase 4',
-	sessionInMemory: 'Сессия в памяти (без сохранения)',
-	trainingNote: 'Обучение появится в Phase 5',
+	devResetProgress: 'DEV сброс прогресса',
+	devSection: 'DEV',
+	homeSubtitle: 'Соединяйте числа — равные или в сумме 10',
+	trainingNote: 'Короткое интерактивное обучение',
+	progressCleared: (cleared: number, total: number) =>
+		`Пройдено: ${cleared} из ${total}`,
+	progressLevel: (level: number, total: number) =>
+		`Уровень ${level} из ${total}`,
+	continueLevel: (level: number) => `Продолжить уровень ${level}`,
+	nextLevelCta: (level: number) => `Следующий уровень ${level}`,
+	startLevel: (level: number) => `Начать уровень ${level}`,
+	levelHeader: (level: number) => `Уровень ${level}`,
+	levelA11yLocked: (level: number) => `Уровень ${level}, заблокирован`,
+	levelA11yCompleted: (level: number) => `Уровень ${level}, пройден`,
+	levelA11yUnlocked: (level: number) => `Уровень ${level}, доступен`,
+	levelA11yActive: (level: number) => `Уровень ${level}, в процессе`,
+	levelA11yReplay: (level: number) => `Уровень ${level}, повтор`,
+	trainingProgress: (current: number, total: number) =>
+		`Шаг ${current} из ${total}`,
+	trainingWrongTap: 'Так не получится — попробуйте другую пару',
+	trainingWrongPair: 'Сейчас нужна другая пара — смотрите подсказку выше',
+	trainingNeedAppend: 'Сначала нажмите «Добавить»',
+	trainingStepDone: 'Отлично!',
+	trainingDoneTitle: 'Обучение пройдено',
+	trainingDoneBody: 'Вы готовы к кампании из 1000 уровней.',
+	trainingStartGame: 'Начать игру',
+	completionStats: (matches: number, appends: number) =>
+		`Пар: ${matches} · Добавлений: ${appends}`,
 } as const

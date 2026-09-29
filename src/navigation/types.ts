@@ -61,6 +61,20 @@ export function replaceStack(route: AppRoute): AppRoute[] {
 	return [route]
 }
 
+/**
+ * Replace the top route (or set the only route).
+ * Used for Training → Level 1 and Next/Replay so Back still goes Home.
+ */
+export function replaceRoute(
+	stack: readonly AppRoute[],
+	route: AppRoute,
+): AppRoute[] {
+	if (stack.length <= 1) {
+		return [route]
+	}
+	return [...stack.slice(0, -1), route]
+}
+
 /** Map route → banner placement policy key. */
 export function routeToBannerPlacement(
 	route: AppRouteName,

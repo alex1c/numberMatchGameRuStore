@@ -1,5 +1,5 @@
 /**
- * Simple completion overlay — no campaign rewards.
+ * Completion overlay — campaign Next / Replay / Home; DEV may keep Undo.
  */
 
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
@@ -8,28 +8,49 @@ import { strings } from '../../i18n/strings.ru'
 import type { SessionCounters } from '../../game/session'
 import { spacing, typography, useTheme } from '../../theme'
 
+export type CompletionMode = 'campaign_progression' | 'campaign_replay' | 'dev'
+
 interface CompletionOverlayProps {
 	readonly visible: boolean
-	readonly profileLabel: string
+	readonly title: string
+	readonly body?: string
 	readonly counters: SessionCounters
-	readonly canUndo: boolean
-	readonly onUndo: () => void
-	readonly onRestart: () => void
+	readonly mode: CompletionMode
+	/** Campaign progression: show Next when there is a next level. */
+	readonly showNext?: boolean
+	readonly nextLabel?: string
+	readonly nextBusy?: boolean
+	readonly onNext?: () => void
+	readonly onReplay?: () => void
 	readonly onHome: () => void
 	readonly onClose: () => void
+	/** DEV / non-campaign only — hidden after campaign completion (§241). */
+	readonly canUndo?: boolean
+	readonly onUndo?: () => void
+	readonly showRestart?: boolean
+	readonly onRestart?: () => void
 }
 
 export function CompletionOverlay({
 	visible,
-	profileLabel,
+	title,
+	body,
 	counters,
-	canUndo,
-	onUndo,
-	onRestart,
+	mode,
+	showNext = false,
+	nextLabel,
+	nextBusy = false,
+	onNext,
+	onReplay,
 	onHome,
 	onClose,
+	canUndo = false,
+	onUndo,
+	showRestart = false,
+	onRestart,
 }: CompletionOverlayProps) {
 	const theme = useTheme()
+	const isCampaign = mode === 'campaign_progression' || mode === 'campaign_replay'
 
 	return (
 		<Modal
@@ -46,29 +67,52 @@ export function CompletionOverlay({
 					style={[styles.card, { backgroundColor: theme.colors.surface }]}
 				>
 					<Text style={[styles.title, { color: theme.colors.text }]}>
-						{strings.completedTitle}
+						{title}
 					</Text>
-					<Text style={[styles.body, { color: theme.colors.textMuted }]}>
-						{strings.completedBody}
-					</Text>
+					{body ? (
+						<Text style={[styles.body, { color: theme.colors.textMuted }]}>
+							{body}
+						</Text>
+					) : null}
 					<Text style={[styles.meta, { color: theme.colors.textMuted }]}>
-						{profileLabel} · {strings.matches} {counters.matchesRemoved} ·{' '}
-						{strings.appends} {counters.appendActions}
+						{strings.completionStats(
+							counters.matchesRemoved,
+							counters.appendActions,
+						)}
 					</Text>
 					<View style={styles.actions}>
-						{canUndo ? (
+						{showNext && onNext ? (
+							<Action
+								label={nextLabel ?? strings.nextLevel}
+								onPress={onNext}
+								primary
+								disabled={nextBusy}
+								testID="completion-next"
+							/>
+						) : null}
+						{onReplay ? (
+							<Action
+								label={strings.repeatLevel}
+								onPress={onReplay}
+								primary={!showNext}
+								testID="completion-replay"
+							/>
+						) : null}
+						{!isCampaign && canUndo && onUndo ? (
 							<Action
 								label={strings.undo}
 								onPress={onUndo}
 								testID="completion-undo"
 							/>
 						) : null}
-						<Action
-							label={strings.restart}
-							onPress={onRestart}
-							primary
-							testID="completion-restart"
-						/>
+						{!isCampaign && showRestart && onRestart ? (
+							<Action
+								label={strings.restart}
+								onPress={onRestart}
+								primary={!canUndo}
+								testID="completion-restart"
+							/>
+						) : null}
 						<Action
 							label={strings.home}
 							onPress={onHome}
@@ -85,35 +129,44 @@ function Action({
 	label,
 	onPress,
 	primary = false,
+	disabled = false,
 	testID,
 }: {
 	readonly label: string
 	readonly onPress: () => void
 	readonly primary?: boolean
+	readonly disabled?: boolean
 	readonly testID: string
 }) {
 	const theme = useTheme()
 	return (
 		<Pressable
 			onPress={onPress}
+			disabled={disabled}
 			accessibilityRole="button"
 			accessibilityLabel={label}
+			accessibilityState={{ disabled }}
 			style={[
 				styles.action,
 				{
-					backgroundColor: primary
-						? theme.colors.controlPrimary
-						: theme.colors.controlSecondary,
+					backgroundColor: disabled
+						? theme.colors.controlDisabled
+						: primary
+							? theme.colors.controlPrimary
+							: theme.colors.controlSecondary,
 					borderColor: theme.colors.border,
+					opacity: disabled ? 0.7 : 1,
 				},
 			]}
 			testID={testID}
 		>
 			<Text
 				style={{
-					color: primary
-						? theme.colors.controlPrimaryText
-						: theme.colors.text,
+					color: disabled
+						? theme.colors.controlDisabledText
+						: primary
+							? theme.colors.controlPrimaryText
+							: theme.colors.text,
 					fontWeight: '600',
 				}}
 			>

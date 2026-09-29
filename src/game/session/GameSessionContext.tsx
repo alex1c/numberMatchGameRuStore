@@ -40,7 +40,10 @@ interface GameSessionContextValue {
 	readonly startSession: (
 		identity: SessionPuzzleIdentity,
 		board: BoardState,
+		options?: { readonly undoAfterCompletion?: boolean },
 	) => void
+	/** Restore a full session (cold start / persist hydrate). */
+	readonly restoreSession: (state: GameSessionState) => void
 	readonly dispatch: (action: GameSessionAction) => void
 	readonly clearSession: () => void
 	readonly requestHint: () => void
@@ -62,11 +65,19 @@ export function GameSessionProvider({
 	}, [session])
 
 	const startSession = useCallback(
-		(identity: SessionPuzzleIdentity, board: BoardState) => {
+		(
+			identity: SessionPuzzleIdentity,
+			board: BoardState,
+			options?: { readonly undoAfterCompletion?: boolean },
+		) => {
 			hintInFlight.current = false
 			const next = createGameSession(identity, board)
-			sessionRef.current = next
-			setSession(next)
+			const withPolicy =
+				options?.undoAfterCompletion === undefined
+					? next
+					: { ...next, undoAfterCompletion: options.undoAfterCompletion }
+			sessionRef.current = withPolicy
+			setSession(withPolicy)
 			if (__DEV__) {
 				console.log(
 					`[NumberMatch] session start ${identity.label} ` +
@@ -76,6 +87,12 @@ export function GameSessionProvider({
 		},
 		[],
 	)
+
+	const restoreSession = useCallback((state: GameSessionState) => {
+		hintInFlight.current = false
+		sessionRef.current = state
+		setSession(state)
+	}, [])
 
 	const dispatch = useCallback((action: GameSessionAction) => {
 		setSession((prev) => {
@@ -212,11 +229,20 @@ export function GameSessionProvider({
 			hasSession: session !== null,
 			isDirty,
 			startSession,
+			restoreSession,
 			dispatch,
 			clearSession,
 			requestHint,
 		}),
-		[session, isDirty, startSession, dispatch, clearSession, requestHint],
+		[
+			session,
+			isDirty,
+			startSession,
+			restoreSession,
+			dispatch,
+			clearSession,
+			requestHint,
+		],
 	)
 
 	return (

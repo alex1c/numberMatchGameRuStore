@@ -43,6 +43,11 @@ export interface GameSessionState {
 	readonly interactionLocked: boolean
 	readonly statusMessage: string | null
 	readonly hintBusy: boolean
+	/**
+	 * Campaign policy (§241): when false, UI must hide Undo after completion.
+	 * DEV fixtures omit this (Undo remains available via overlay).
+	 */
+	readonly undoAfterCompletion?: boolean
 }
 
 export type GameSessionAction =

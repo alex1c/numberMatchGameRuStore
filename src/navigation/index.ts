@@ -9,6 +9,7 @@ import { BackHandler } from 'react-native'
 import {
 	pushRoute,
 	replaceStack,
+	replaceRoute,
 	resolveBackTarget,
 	type AppRoute,
 	type AppRouteName,
@@ -20,6 +21,10 @@ export function useAppNavigation(initial: AppRouteName = 'home') {
 
 	const navigate = useCallback((name: AppRouteName) => {
 		setStack((prev) => pushRoute(prev, { name }))
+	}, [])
+
+	const replace = useCallback((name: AppRouteName) => {
+		setStack((prev) => replaceRoute(prev, { name }))
 	}, [])
 
 	const goHome = useCallback(() => {
@@ -56,6 +61,7 @@ export function useAppNavigation(initial: AppRouteName = 'home') {
 		current,
 		stack,
 		navigate,
+		replace,
 		goHome,
 		goBack,
 	}
@@ -66,6 +72,7 @@ export {
 	pushRoute,
 	popRoute,
 	replaceStack,
+	replaceRoute,
 	resolveBackTarget,
 	routeToBannerPlacement,
 } from './types'
