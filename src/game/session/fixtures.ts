@@ -5,8 +5,6 @@
 
 import { boardFromFixture, type BoardState } from '../core'
 import {
-	DIFFICULTY_PROFILE_VERSION,
-	GENERATION_VERSION,
 	REPRESENTATIVE_UI_SEEDS,
 	generatePuzzle,
 	puzzleFingerprint,
@@ -225,12 +223,12 @@ export function loadPlaytestFixture(
 			return { ok: false, error: `hand fixture ${fixture.id} missing board` }
 		}
 		const board = fixture.buildBoard()
-		const { fingerprint } = puzzleFingerprint(board)
+		const { fingerprint } = puzzleFingerprint(board, 2)
 		return {
 			ok: true,
 			identity: {
-				generationVersion: GENERATION_VERSION,
-				difficultyProfileVersion: DIFFICULTY_PROFILE_VERSION,
+				generationVersion: 2,
+				difficultyProfileVersion: 1,
 				seed: fixture.seed,
 				profile: fixture.profile,
 				fingerprint,
@@ -247,6 +245,8 @@ export function loadPlaytestFixture(
 	const result = generatePuzzle({
 		seed: fixture.seed,
 		profile: fixture.profile,
+		// DEV playtest fixtures are frozen against gv2 sparse semantics.
+		generationVersion: 2,
 	})
 
 	if (result.status !== 'accepted') {

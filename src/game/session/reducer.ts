@@ -59,6 +59,8 @@ export function createGameSession(
 		interactionLocked: false,
 		statusMessage: null,
 		hintBusy: false,
+		usedHint: false,
+		usedUndo: false,
 	}
 }
 
@@ -73,6 +75,9 @@ export function hydrateGameSession(input: {
 	readonly history?: readonly BoardState[]
 	readonly counters?: SessionCounters
 	readonly completed?: boolean
+	readonly usedHint?: boolean
+	readonly usedUndo?: boolean
+	readonly undoAfterCompletion?: boolean
 }): GameSessionState {
 	const board = cloneBoard(input.board)
 	const completed = input.completed ?? isBoardCleared(board)
@@ -90,6 +95,9 @@ export function hydrateGameSession(input: {
 		interactionLocked: false,
 		statusMessage: completed ? 'cleared' : null,
 		hintBusy: false,
+		usedHint: input.usedHint === true,
+		usedUndo: input.usedUndo === true,
+		undoAfterCompletion: input.undoAfterCompletion,
 	}
 }
 
@@ -115,6 +123,9 @@ export function reduceGameSession(
 			return { ...state, hintBusy: action.busy }
 
 		case 'APPLY_HINT': {
+			// Only a delivered hint (match/append) counts against the clean-run star.
+			const delivered =
+				action.kind === 'match' || action.kind === 'append'
 			if (action.kind === 'match' && action.indices) {
 				return {
 					...state,
@@ -122,6 +133,7 @@ export function reduceGameSession(
 					hintIndices: action.indices,
 					statusMessage: action.message,
 					selectedIndex: null,
+					usedHint: delivered ? true : state.usedHint,
 				}
 			}
 			return {
@@ -129,6 +141,7 @@ export function reduceGameSession(
 				hintBusy: false,
 				hintIndices: [],
 				statusMessage: action.message,
+				usedHint: delivered ? true : state.usedHint,
 			}
 		}
 
@@ -255,6 +268,7 @@ export function reduceGameSession(
 				hasAvailableMoves: hasAvailableMoves(board),
 				statusMessage: null,
 				hintBusy: false,
+				usedUndo: true,
 			}
 		}
 
@@ -273,6 +287,8 @@ export function reduceGameSession(
 				statusMessage: null,
 				hintBusy: false,
 				interactionLocked: false,
+				usedHint: false,
+				usedUndo: false,
 			}
 		}
 

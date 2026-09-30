@@ -1,15 +1,22 @@
 /**
  * Persistence schema types — versioned root blob under a stable storage key.
+ *
+ * schemaVersion 2 = Campaign v2 + mastery stars + attempt help flags.
+ * Storage key stays `numbermatch.persist.v1` (schema lives inside the blob).
  */
 
 import type { BoardState, CellValue } from '../game/core'
-import type { DifficultyProfile } from '../game/generator'
+import type { CampaignDensity, DifficultyProfile } from '../game/generator'
+import type { StarCount } from '../game/stars'
 
 /** Stable AsyncStorage key — schema evolves inside the blob, not the key. */
 export const STORAGE_KEY = 'numbermatch.persist.v1' as const
 
 /** Soft undo / history bound mirrored from gameplay session. */
 export const PERSIST_HISTORY_BOUND = 64 as const
+
+/** Current on-disk schema. */
+export const PERSIST_SCHEMA_VERSION = 2 as const
 
 export type PersistedSessionPurpose = 'progression' | 'replay'
 export type PersistedSessionStatus = 'in_progress' | 'completed'
@@ -47,26 +54,54 @@ export interface PersistedActiveSession {
 	readonly seed: number
 	readonly profile: DifficultyProfile
 	readonly fingerprint: string
+	/** gv3 density (rows at width 8). Required for Campaign v2 sessions. */
+	readonly density: CampaignDensity
 	readonly board: PersistedBoardV1
 	readonly initialBoard?: PersistedBoardV1
 	readonly history: readonly PersistedBoardV1[]
 	readonly counters: PersistedCountersV1
 	/** Echo of board.nextCellSeq for quick validation. */
 	readonly nextCellSeq: number
+	/** Attempt help flags — cold restore must preserve for star scoring. */
+	readonly usedHint: boolean
+	readonly usedUndo: boolean
 }
 
-/** Current on-disk root document. */
+/**
+ * Historical schema v1 root (Campaign v1) — migration input only.
+ * Not used at runtime after migrateToCurrent.
+ */
 export interface PersistedRootV1 {
 	readonly schemaVersion: 1
 	readonly campaignVersion: 1
 	readonly revision: number
 	readonly trainingCompleted: boolean
+	readonly highestCompletedLevel: number
+	readonly activeSession: unknown
+}
+
+/**
+ * Current on-disk root document (Campaign v2 + stars).
+ */
+export interface PersistedRootV2 {
+	readonly schemaVersion: 2
+	readonly campaignVersion: 2
+	readonly revision: number
+	readonly trainingCompleted: boolean
 	/** Frontier: 0 means nothing cleared; 1000 means campaign finished. */
 	readonly highestCompletedLevel: number
+	/**
+	 * Best stars per level — length 1000, index 0 = Level 1, values 0..3.
+	 * Invariant: levels 1..highestCompletedLevel each have ≥ 1 star.
+	 */
+	readonly bestStars: readonly StarCount[]
 	readonly activeSession: PersistedActiveSession | null
 }
 
-export type PersistedRoot = PersistedRootV1
+export type PersistedRoot = PersistedRootV2
+
+/** @deprecated Alias kept for gradual rename — same as PersistedRootV2. */
+export type PersistedRootV1Compat = PersistedRootV2
 
 /** Low-level key/value adapter (AsyncStorage or in-memory for tests). */
 export interface StorageAdapter {

@@ -32,6 +32,7 @@ export type CampaignStartResult =
 				readonly seed: number
 				readonly profile: PersistedActiveSession['profile']
 				readonly fingerprint: string
+				readonly density: PersistedActiveSession['density']
 			}
 	  }
 	| { readonly ok: false; readonly reason: string }
@@ -77,6 +78,7 @@ export function prepareCampaignLevel(
 			seed: resolved.entry.seed,
 			profile: resolved.entry.profile,
 			fingerprint: resolved.fingerprint,
+			density: resolved.entry.density,
 		},
 	}
 }
@@ -104,6 +106,8 @@ export function gameSessionFromPersisted(
 		history: boards.history,
 		counters: session.counters,
 		completed: session.status === 'completed',
+		usedHint: session.usedHint,
+		usedUndo: session.usedUndo,
 	})
 }
 

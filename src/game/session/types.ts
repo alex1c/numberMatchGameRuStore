@@ -48,6 +48,10 @@ export interface GameSessionState {
 	 * DEV fixtures omit this (Undo remains available via overlay).
 	 */
 	readonly undoAfterCompletion?: boolean
+	/** Attempt flag: a delivered Hint was consumed (star penalty). */
+	readonly usedHint: boolean
+	/** Attempt flag: Undo was performed (star penalty). */
+	readonly usedUndo: boolean
 }
 
 export type GameSessionAction =

@@ -2,7 +2,7 @@
  * Serialized write queue with revision checks and failure recovery.
  */
 
-import type { PersistedRootV1, StorageAdapter } from './types'
+import type { PersistedRootV2, StorageAdapter } from './types'
 import { STORAGE_KEY } from './types'
 import { migrateToCurrent } from './migrate'
 
@@ -33,7 +33,7 @@ export class PersistWriteQueue {
 	 * Enqueue a write of the given root. Rejects when root.revision is older
 	 * than the last successful write (stale writer).
 	 */
-	enqueueWrite(root: PersistedRootV1): Promise<WriteQueueResult> {
+	enqueueWrite(root: PersistedRootV2): Promise<WriteQueueResult> {
 		const run = async (): Promise<WriteQueueResult> => {
 			if (
 				this.lastWrittenRevision >= 0 &&
@@ -66,7 +66,7 @@ export class PersistWriteQueue {
 					}
 				}
 			} catch {
-				// Disk read failure — continue and attempt write; recovery below.
+				// Disk read failure вЂ” continue and attempt write; recovery below.
 			}
 
 			let payload: string

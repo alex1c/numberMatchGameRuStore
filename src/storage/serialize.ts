@@ -11,7 +11,7 @@ import {
 import type {
 	PersistedActiveSession,
 	PersistedBoardV1,
-	PersistedRootV1,
+	PersistedRootV2,
 } from './types'
 import { PERSIST_HISTORY_BOUND } from './types'
 
@@ -54,8 +54,8 @@ export function boundHistory(
 }
 
 /** Deep-clone a root document for safe mutation outside the write queue. */
-export function cloneRoot(root: PersistedRootV1): PersistedRootV1 {
-	return JSON.parse(JSON.stringify(root)) as PersistedRootV1
+export function cloneRoot(root: PersistedRootV2): PersistedRootV2 {
+	return JSON.parse(JSON.stringify(root)) as PersistedRootV2
 }
 
 /** Clone an active session with board clones. */

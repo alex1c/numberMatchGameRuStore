@@ -1,5 +1,6 @@
 /**
  * Persistence repository — hydrate once, mutate via revisioned writes.
+ * schemaVersion 2 + Campaign v2 + mastery stars.
  */
 
 import {
@@ -8,15 +9,21 @@ import {
 	isCampaignCatalogReady,
 } from '../game/campaign'
 import { GENERATION_VERSION } from '../game/generator'
+import {
+	starsFromAttempt,
+	totalStars,
+	withBestStars,
+	type StarCount,
+} from '../game/stars'
 import { createDefaultRoot } from './defaults'
 import { migrateToCurrent } from './migrate'
 import { boundHistory, cloneRoot, serializeBoard } from './serialize'
 import type {
 	PersistedActiveSession,
-	PersistedRootV1,
+	PersistedRootV2,
 	StorageAdapter,
 } from './types'
-import { STORAGE_KEY } from './types'
+import { PERSIST_SCHEMA_VERSION, STORAGE_KEY } from './types'
 import { PersistWriteQueue, type WriteQueueResult } from './writeQueue'
 
 const isDev =
@@ -34,7 +41,7 @@ export interface SessionValidationResult {
  * Invalid sessions are dropped on hydrate while preserving highestCompletedLevel.
  */
 export function validateSessionSemantics(
-	root: Pick<PersistedRootV1, 'highestCompletedLevel'>,
+	root: Pick<PersistedRootV2, 'highestCompletedLevel'>,
 	session: PersistedActiveSession,
 	options?: { readonly catalogAvailable?: boolean },
 ): SessionValidationResult {
@@ -51,7 +58,6 @@ export function validateSessionSemantics(
 
 	if (session.purpose === 'progression') {
 		if (session.status === 'in_progress') {
-			// Next unsolved level.
 			if (session.level !== highest + 1) {
 				return {
 					ok: false,
@@ -60,7 +66,6 @@ export function validateSessionSemantics(
 				}
 			}
 		} else if (session.status === 'completed') {
-			// Just-finished level should match the recorded frontier.
 			if (session.level !== highest && session.level !== highest + 1) {
 				return {
 					ok: false,
@@ -94,6 +99,12 @@ export function validateSessionSemantics(
 					reason: 'seed/profile mismatch vs catalog',
 				}
 			}
+			if (entry.density !== session.density) {
+				return {
+					ok: false,
+					reason: 'density mismatch vs catalog',
+				}
+			}
 		} catch (err) {
 			return {
 				ok: false,
@@ -106,8 +117,8 @@ export function validateSessionSemantics(
 }
 
 export class PersistRepository {
-	private root: PersistedRootV1 | null = null
-	private hydratePromise: Promise<PersistedRootV1> | null = null
+	private root: PersistedRootV2 | null = null
+	private hydratePromise: Promise<PersistedRootV2> | null = null
 	private readonly queue: PersistWriteQueue
 
 	constructor(private readonly adapter: StorageAdapter) {
@@ -115,7 +126,7 @@ export class PersistRepository {
 	}
 
 	/** Load once; subsequent calls return the cached root. */
-	async hydrate(): Promise<PersistedRootV1> {
+	async hydrate(): Promise<PersistedRootV2> {
 		if (this.root) {
 			return this.root
 		}
@@ -131,7 +142,7 @@ export class PersistRepository {
 		}
 	}
 
-	private async hydrateOnce(): Promise<PersistedRootV1> {
+	private async hydrateOnce(): Promise<PersistedRootV2> {
 		let raw: string | null = null
 		try {
 			raw = await this.adapter.getItem(STORAGE_KEY)
@@ -144,17 +155,16 @@ export class PersistRepository {
 
 		let root = migrateToCurrent(raw)
 
-		// Align campaignVersion when catalog ships a newer constant.
 		if (root.campaignVersion !== CAMPAIGN_VERSION) {
 			if (isDev) {
 				console.warn(
-					`[storage] campaignVersion ${root.campaignVersion} → ${CAMPAIGN_VERSION}; dropping active session`,
+					`[storage] campaignVersion ${root.campaignVersion} → ${CAMPAIGN_VERSION}; resetting campaign`,
 				)
 			}
 			root = {
-				...root,
-				campaignVersion: CAMPAIGN_VERSION,
-				activeSession: null,
+				...createDefaultRoot(),
+				trainingCompleted: root.trainingCompleted,
+				revision: root.revision,
 			}
 		}
 
@@ -175,7 +185,7 @@ export class PersistRepository {
 	}
 
 	/** Synchronous peek after hydrate (throws if not hydrated). */
-	getRoot(): PersistedRootV1 {
+	getRoot(): PersistedRootV2 {
 		if (!this.root) {
 			throw new Error('PersistRepository.getRoot: not hydrated')
 		}
@@ -187,19 +197,23 @@ export class PersistRepository {
 		return this.root !== null
 	}
 
+	/** Derived mastery total (safe sum of bestStars). */
+	getTotalStars(): number {
+		return totalStars(this.getRoot().bestStars)
+	}
+
 	/**
 	 * Apply an updater, bump revision, and enqueue a write.
-	 * Returns the new root on success; restores previous root on stale/failure.
 	 */
 	async update(
-		updater: (current: PersistedRootV1) => PersistedRootV1,
-	): Promise<{ root: PersistedRootV1; write: WriteQueueResult }> {
+		updater: (current: PersistedRootV2) => PersistedRootV2,
+	): Promise<{ root: PersistedRootV2; write: WriteQueueResult }> {
 		const current = await this.hydrate()
 		const previous = current
 		const draft = updater(cloneRoot(current))
-		let next: PersistedRootV1 = {
+		let next: PersistedRootV2 = {
 			...draft,
-			schemaVersion: 1,
+			schemaVersion: PERSIST_SCHEMA_VERSION,
 			campaignVersion: CAMPAIGN_VERSION,
 			revision: current.revision + 1,
 			activeSession: draft.activeSession
@@ -210,7 +224,6 @@ export class PersistRepository {
 				: null,
 		}
 
-		// Re-validate session semantics before committing.
 		if (next.activeSession) {
 			const check = validateSessionSemantics(next, next.activeSession)
 			if (!check.ok) {
@@ -227,7 +240,6 @@ export class PersistRepository {
 		this.root = next
 		const write = await this.queue.enqueueWrite(next)
 		if (!write.ok) {
-			// Failure recovery: prefer disk state when possible.
 			try {
 				const raw = await this.adapter.getItem(STORAGE_KEY)
 				this.root = migrateToCurrent(raw)
@@ -238,7 +250,7 @@ export class PersistRepository {
 		return { root: this.root, write }
 	}
 
-	async setTrainingCompleted(completed: boolean): Promise<PersistedRootV1> {
+	async setTrainingCompleted(completed: boolean): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => ({
 			...current,
 			trainingCompleted: completed,
@@ -246,7 +258,7 @@ export class PersistRepository {
 		return root
 	}
 
-	async setHighestCompletedLevel(level: number): Promise<PersistedRootV1> {
+	async setHighestCompletedLevel(level: number): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => ({
 			...current,
 			highestCompletedLevel: level,
@@ -256,7 +268,7 @@ export class PersistRepository {
 
 	async setActiveSession(
 		session: PersistedActiveSession | null,
-	): Promise<PersistedRootV1> {
+	): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => ({
 			...current,
 			activeSession: session,
@@ -264,20 +276,24 @@ export class PersistRepository {
 		return root
 	}
 
-	async clearActiveSession(): Promise<PersistedRootV1> {
+	async clearActiveSession(): Promise<PersistedRootV2> {
 		return this.setActiveSession(null)
 	}
 
 	/**
 	 * Legacy helper: bump frontier and clear active session.
-	 * Prefer commitProgressionCompletion for campaign UI (keeps completed session).
 	 */
-	async completeProgressionLevel(level: number): Promise<PersistedRootV1> {
+	async completeProgressionLevel(level: number): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => {
 			const highest = Math.max(current.highestCompletedLevel, level)
+			const attemptStars = starsFromAttempt({
+				usedHint: false,
+				usedUndo: false,
+			})
 			return {
 				...current,
 				highestCompletedLevel: highest,
+				bestStars: withBestStars(current.bestStars, level, attemptStars),
 				activeSession: null,
 			}
 		})
@@ -285,10 +301,10 @@ export class PersistRepository {
 	}
 
 	/**
-	 * Atomic progression completion (§ completion transaction):
-	 * - highestCompletedLevel = max(current, level)
-	 * - active session marked completed with history discarded (storage savings)
-	 * Idempotent when called again for the same or lower level.
+	 * Atomic progression completion with stars:
+	 * - frontier advance
+	 * - bestStars merge (never decreases)
+	 * - completed session (history discarded)
 	 */
 	async commitProgressionCompletion(input: {
 		readonly level: number
@@ -297,11 +313,23 @@ export class PersistRepository {
 		readonly seed: number
 		readonly profile: PersistedActiveSession['profile']
 		readonly fingerprint: string
+		readonly density: PersistedActiveSession['density']
+		readonly usedHint: boolean
+		readonly usedUndo: boolean
 		readonly initialBoard?: Parameters<typeof serializeBoard>[0]
 		readonly generationVersion?: number
-	}): Promise<PersistedRootV1> {
+	}): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => {
 			const highest = Math.max(current.highestCompletedLevel, input.level)
+			const attemptStars = starsFromAttempt({
+				usedHint: input.usedHint,
+				usedUndo: input.usedUndo,
+			})
+			const bestStars = withBestStars(
+				current.bestStars,
+				input.level,
+				attemptStars,
+			)
 			const board = serializeBoard(input.board)
 			const completedSession: PersistedActiveSession = {
 				mode: 'campaign',
@@ -315,11 +343,13 @@ export class PersistRepository {
 				seed: input.seed,
 				profile: input.profile,
 				fingerprint: input.fingerprint,
+				density: input.density,
 				board,
-				// Discard undo history after completion to shrink the blob.
 				history: [],
 				counters: input.counters,
 				nextCellSeq: board.nextCellSeq,
+				usedHint: input.usedHint,
+				usedUndo: input.usedUndo,
 				...(input.initialBoard
 					? { initialBoard: serializeBoard(input.initialBoard) }
 					: current.activeSession?.initialBoard
@@ -329,6 +359,7 @@ export class PersistRepository {
 			return {
 				...current,
 				highestCompletedLevel: highest,
+				bestStars,
 				activeSession: completedSession,
 			}
 		})
@@ -336,8 +367,7 @@ export class PersistRepository {
 	}
 
 	/**
-	 * Replay completion: mark session completed, discard history,
-	 * do NOT bump highestCompletedLevel (frontier unchanged).
+	 * Replay completion: update best stars if improved; frontier unchanged.
 	 */
 	async commitReplayCompletion(input: {
 		readonly level: number
@@ -346,10 +376,22 @@ export class PersistRepository {
 		readonly seed: number
 		readonly profile: PersistedActiveSession['profile']
 		readonly fingerprint: string
+		readonly density: PersistedActiveSession['density']
+		readonly usedHint: boolean
+		readonly usedUndo: boolean
 		readonly initialBoard?: Parameters<typeof serializeBoard>[0]
 		readonly generationVersion?: number
-	}): Promise<PersistedRootV1> {
+	}): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => {
+			const attemptStars = starsFromAttempt({
+				usedHint: input.usedHint,
+				usedUndo: input.usedUndo,
+			})
+			const bestStars = withBestStars(
+				current.bestStars,
+				input.level,
+				attemptStars,
+			)
 			const board = serializeBoard(input.board)
 			const completedSession: PersistedActiveSession = {
 				mode: 'campaign',
@@ -363,10 +405,13 @@ export class PersistRepository {
 				seed: input.seed,
 				profile: input.profile,
 				fingerprint: input.fingerprint,
+				density: input.density,
 				board,
 				history: [],
 				counters: input.counters,
 				nextCellSeq: board.nextCellSeq,
+				usedHint: input.usedHint,
+				usedUndo: input.usedUndo,
 				...(input.initialBoard
 					? { initialBoard: serializeBoard(input.initialBoard) }
 					: current.activeSession?.initialBoard
@@ -375,6 +420,7 @@ export class PersistRepository {
 			}
 			return {
 				...current,
+				bestStars,
 				activeSession: completedSession,
 			}
 		})
@@ -382,15 +428,16 @@ export class PersistRepository {
 	}
 
 	/**
-	 * Sync in-progress gameplay board / history / counters into activeSession.
-	 * No-op when there is no campaign active session.
+	 * Sync in-progress gameplay including attempt help flags.
 	 */
 	async syncActiveGameplay(input: {
 		readonly board: Parameters<typeof serializeBoard>[0]
 		readonly history: readonly Parameters<typeof serializeBoard>[0][]
 		readonly counters: PersistedActiveSession['counters']
+		readonly usedHint: boolean
+		readonly usedUndo: boolean
 		readonly status?: PersistedActiveSession['status']
-	}): Promise<PersistedRootV1> {
+	}): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => {
 			if (!current.activeSession) {
 				return current
@@ -405,6 +452,8 @@ export class PersistRepository {
 					history: boundHistory(input.history.map(serializeBoard)),
 					counters: input.counters,
 					nextCellSeq: board.nextCellSeq,
+					usedHint: input.usedHint,
+					usedUndo: input.usedUndo,
 				},
 			}
 		})
@@ -412,7 +461,7 @@ export class PersistRepository {
 	}
 
 	/** Wipe storage and reset to defaults (tests / settings / DEV). */
-	async resetAll(): Promise<PersistedRootV1> {
+	async resetAll(): Promise<PersistedRootV2> {
 		const fresh = createDefaultRoot()
 		this.root = fresh
 		this.queue.reset()
@@ -429,11 +478,14 @@ export function buildActiveSession(input: {
 	readonly seed: number
 	readonly profile: PersistedActiveSession['profile']
 	readonly fingerprint: string
+	readonly density: PersistedActiveSession['density']
 	readonly board: Parameters<typeof serializeBoard>[0]
 	readonly initialBoard?: Parameters<typeof serializeBoard>[0]
 	readonly history?: readonly Parameters<typeof serializeBoard>[0][]
 	readonly counters: PersistedActiveSession['counters']
 	readonly generationVersion?: number
+	readonly usedHint?: boolean
+	readonly usedUndo?: boolean
 }): PersistedActiveSession {
 	const board = serializeBoard(input.board)
 	const history = (input.history ?? []).map(serializeBoard)
@@ -446,10 +498,13 @@ export function buildActiveSession(input: {
 		seed: input.seed,
 		profile: input.profile,
 		fingerprint: input.fingerprint,
+		density: input.density,
 		board,
 		history: boundHistory(history),
 		counters: input.counters,
 		nextCellSeq: board.nextCellSeq,
+		usedHint: input.usedHint === true,
+		usedUndo: input.usedUndo === true,
 	}
 	if (input.initialBoard) {
 		return {
@@ -459,3 +514,5 @@ export function buildActiveSession(input: {
 	}
 	return session
 }
+
+export type { StarCount }

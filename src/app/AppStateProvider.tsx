@@ -2,7 +2,7 @@
  * App-level campaign progress + persistence provider (PHASE 5).
  *
  * Hydrates once and owns PersistRepository. Does NOT depend on GameSession
- * (provider order: AppState → GameSession → shell). Screens / hooks bridge
+ * (provider order: AppState в†’ GameSession в†’ shell). Screens / hooks bridge
  * gameplay into persistence via the methods below.
  *
  * DEV fixtures must call markDevFixtureSession() and must NOT write campaign
@@ -34,10 +34,11 @@ import {
 	createAsyncStorageAdapter,
 	createDefaultRoot,
 	type PersistedActiveSession,
-	type PersistedRootV1,
+	type PersistedRootV2,
 	type PersistedSessionPurpose,
 	type StorageAdapter,
 } from '../storage'
+import { totalStars, type StarCount } from '../game/stars'
 import { spacing, typography, useTheme } from '../theme'
 import type { AppRouteName } from '../navigation'
 import {
@@ -48,7 +49,7 @@ import {
 
 export type HydrateStatus = 'pending' | 'ready' | 'failed'
 
-/** How the live GameSession was launched — controls persist path. */
+/** How the live GameSession was launched вЂ” controls persist path. */
 export type SessionLaunchSource = 'campaign' | 'dev_fixture' | 'none'
 
 export interface StartCampaignLevelResult {
@@ -62,12 +63,14 @@ export interface StartCampaignLevelResult {
 
 interface AppStateContextValue {
 	readonly hydrateStatus: HydrateStatus
-	/** Decided once after hydrate — never changes (avoids flicker races). */
+	/** Decided once after hydrate вЂ” never changes (avoids flicker races). */
 	readonly initialRoute: AppRouteName
-	readonly root: PersistedRootV1
+	readonly root: PersistedRootV2
 	readonly trainingCompleted: boolean
 	readonly highestCompletedLevel: number
 	readonly activeSession: PersistedActiveSession | null
+	readonly bestStars: readonly StarCount[]
+	readonly totalStars: number
 	readonly sessionSource: SessionLaunchSource
 	readonly repository: PersistRepository
 	readonly completeTraining: () => Promise<void>
@@ -82,11 +85,11 @@ interface AppStateContextValue {
 	readonly commitProgressionCompletion: (
 		level: number,
 		session: GameSessionState,
-	) => Promise<PersistedRootV1 | null>
+	) => Promise<PersistedRootV2 | null>
 	readonly commitReplayCompletion: (
 		level: number,
 		session: GameSessionState,
-	) => Promise<PersistedRootV1 | null>
+	) => Promise<PersistedRootV2 | null>
 	readonly clearActiveSession: () => Promise<void>
 	readonly syncSessionFromGameplay: (
 		session: GameSessionState,
@@ -117,7 +120,7 @@ export function AppStateProvider({
 	const [repository] = useState(() => createRepository(adapter))
 
 	const [hydrateStatus, setHydrateStatus] = useState<HydrateStatus>('pending')
-	const [root, setRoot] = useState<PersistedRootV1>(createDefaultRoot)
+	const [root, setRoot] = useState<PersistedRootV2>(createDefaultRoot)
 	const [initialRoute, setInitialRoute] = useState<AppRouteName>('home')
 	const [sessionSource, setSessionSource] =
 		useState<SessionLaunchSource>('none')
@@ -199,6 +202,7 @@ export function AppStateProvider({
 				seed: prepared.entry.seed,
 				profile: prepared.entry.profile,
 				fingerprint: prepared.entry.fingerprint,
+				density: prepared.entry.density,
 				board: prepared.board,
 				initialBoard: prepared.board,
 				history: [],
@@ -207,6 +211,8 @@ export function AppStateProvider({
 					appendActions: 0,
 					undoActions: 0,
 				},
+				usedHint: false,
+				usedUndo: false,
 			})
 
 			const next = await repository.setActiveSession(session)
@@ -227,7 +233,7 @@ export function AppStateProvider({
 		async (
 			level: number,
 			session: GameSessionState,
-		): Promise<PersistedRootV1 | null> => {
+		): Promise<PersistedRootV2 | null> => {
 			// Guard double-tap / concurrent Next+complete races.
 			if (completionInFlight.current) {
 				return null
@@ -256,6 +262,9 @@ export function AppStateProvider({
 					seed: active.seed,
 					profile: active.profile,
 					fingerprint: active.fingerprint,
+					density: active.density,
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
 					initialBoard: session.initialBoard,
 					generationVersion: active.generationVersion,
 				})
@@ -272,7 +281,7 @@ export function AppStateProvider({
 		async (
 			level: number,
 			session: GameSessionState,
-		): Promise<PersistedRootV1 | null> => {
+		): Promise<PersistedRootV2 | null> => {
 			if (completionInFlight.current) {
 				return null
 			}
@@ -295,6 +304,9 @@ export function AppStateProvider({
 					seed: active.seed,
 					profile: active.profile,
 					fingerprint: active.fingerprint,
+					density: active.density,
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
 					initialBoard: session.initialBoard,
 					generationVersion: active.generationVersion,
 				})
@@ -326,6 +338,8 @@ export function AppStateProvider({
 				board: session.board,
 				history: session.history,
 				counters: session.counters,
+				usedHint: session.usedHint,
+				usedUndo: session.usedUndo,
 				status: 'in_progress',
 			})
 			setRoot(next)
@@ -374,6 +388,8 @@ export function AppStateProvider({
 			trainingCompleted: root.trainingCompleted,
 			highestCompletedLevel: root.highestCompletedLevel,
 			activeSession: root.activeSession,
+			bestStars: root.bestStars,
+			totalStars: totalStars(root.bestStars),
 			sessionSource,
 			repository,
 			completeTraining,
@@ -436,16 +452,16 @@ export function useAppState(): AppStateContextValue {
 	return ctx
 }
 
-/** DEV diagnostics helper — campaignVersion stays in sync with catalog. */
-export function formatDevDiagnostics(root: PersistedRootV1): string {
-	const level = root.activeSession?.level ?? '—'
+/** DEV diagnostics helper вЂ” campaignVersion stays in sync with catalog. */
+export function formatDevDiagnostics(root: PersistedRootV2): string {
+	const level = root.activeSession?.level ?? 'вЂ”'
 	return (
-		`schema ${root.schemaVersion} · campaign v${CAMPAIGN_VERSION} ` +
-		`· level ${level} · rev ${root.revision}`
+		`schema ${root.schemaVersion} В· campaign v${CAMPAIGN_VERSION} ` +
+		`В· level ${level} В· rev ${root.revision}`
 	)
 }
 
-/** Exported for tests — ensure frontier arithmetic stays consistent. */
+/** Exported for tests вЂ” ensure frontier arithmetic stays consistent. */
 export function nextPlayLevel(highestCompletedLevel: number): number {
 	if (highestCompletedLevel >= CAMPAIGN_LEVEL_COUNT) {
 		return CAMPAIGN_LEVEL_COUNT

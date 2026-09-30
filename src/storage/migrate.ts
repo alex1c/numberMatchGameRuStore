@@ -1,10 +1,19 @@
 /**
- * Schema detection and migration to the current PersistedRootV1.
+ * Schema detection and migration to PersistedRootV2.
+ *
+ * Pre-release policy:
+ * - schema 1 / Campaign v1 → keep trainingCompleted; RESET campaign
+ *   progress, active session, and stars (do not continue v1 boards as v2).
+ * - corrupt / unknown → safe defaults.
  */
 
+import { CAMPAIGN_VERSION } from '../game/campaign'
+import { createEmptyStarBoard } from '../game/stars'
 import { createDefaultRoot } from './defaults'
+import { starBoardFromRawOrRepair } from './starsPersist'
 import { parsePersistedRootJson, validatePersistedRoot } from './validate'
-import type { PersistedRootV1 } from './types'
+import { PERSIST_SCHEMA_VERSION } from './types'
+import type { PersistedRootV2 } from './types'
 
 const isDev =
 	typeof __DEV__ !== 'undefined'
@@ -21,10 +30,9 @@ function devLog(message: string, detail?: unknown): void {
 }
 
 /**
- * Migrate unknown stored JSON into PersistedRootV1.
- * Unknown future schema versions fall back to safe defaults (DEV log).
+ * Migrate unknown stored JSON into PersistedRootV2.
  */
-export function migrateToCurrent(rawText: string | null): PersistedRootV1 {
+export function migrateToCurrent(rawText: string | null): PersistedRootV2 {
 	if (rawText === null || rawText.trim() === '') {
 		return createDefaultRoot()
 	}
@@ -45,29 +53,62 @@ export function migrateToCurrent(rawText: string | null): PersistedRootV1 {
 	const record = parsed as Record<string, unknown>
 	const schemaVersion = record.schemaVersion
 
-	if (schemaVersion === 1) {
+	// schema v2 — validate; repair stars / drop bad session via validate.
+	if (schemaVersion === PERSIST_SCHEMA_VERSION) {
 		const validated = validatePersistedRoot(record)
 		if (validated.ok) {
+			// Campaign version mismatch (e.g. future bump): reset campaign only.
+			if (validated.value.campaignVersion !== CAMPAIGN_VERSION) {
+				devLog(
+					`campaignVersion ${validated.value.campaignVersion} → ${CAMPAIGN_VERSION}; resetting campaign progress`,
+				)
+				return {
+					...createDefaultRoot(),
+					trainingCompleted: validated.value.trainingCompleted,
+					revision: validated.value.revision,
+				}
+			}
 			return validated.value
 		}
-		devLog('schema v1 failed validation — using defaults', validated.reason)
+		devLog('schema v2 failed validation — using defaults', validated.reason)
 		return createDefaultRoot()
 	}
 
-	if (typeof schemaVersion === 'number' && schemaVersion > 1) {
+	// schema v1 (Campaign v1) — preserve training; reset campaign + stars.
+	if (schemaVersion === 1) {
+		devLog(
+			'schema v1 → v2: preserving trainingCompleted; resetting Campaign progress/session/stars',
+		)
+		const trainingCompleted =
+			typeof record.trainingCompleted === 'boolean'
+				? record.trainingCompleted
+				: false
+		const revision =
+			typeof record.revision === 'number' &&
+			Number.isInteger(record.revision) &&
+			record.revision >= 0
+				? record.revision
+				: 0
+		return {
+			...createDefaultRoot(),
+			trainingCompleted,
+			revision,
+		}
+	}
+
+	if (typeof schemaVersion === 'number' && schemaVersion > PERSIST_SCHEMA_VERSION) {
 		devLog(
 			`unknown future schemaVersion ${schemaVersion} — using safe defaults`,
 		)
 		return createDefaultRoot()
 	}
 
-	// Legacy / missing version — attempt soft read of known fields, else defaults.
 	devLog(`unrecognized schemaVersion ${String(schemaVersion)} — using defaults`)
 	return createDefaultRoot()
 }
 
 /** Convenience when the caller already has a validated parse path. */
-export function migrateParsedOrDefault(rawText: string | null): PersistedRootV1 {
+export function migrateParsedOrDefault(rawText: string | null): PersistedRootV2 {
 	if (rawText === null) {
 		return createDefaultRoot()
 	}
@@ -77,3 +118,6 @@ export function migrateParsedOrDefault(rawText: string | null): PersistedRootV1 
 	}
 	return migrateToCurrent(rawText)
 }
+
+/** Re-export for tests that repair stars during migration checks. */
+export { starBoardFromRawOrRepair, createEmptyStarBoard }

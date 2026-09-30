@@ -7,15 +7,17 @@ import {
 	validateBoard,
 	type BoardState,
 } from '../game/core'
-import { isDifficultyProfile } from '../game/generator'
-import { CAMPAIGN_LEVEL_COUNT } from '../game/campaign'
+import { isCampaignDensity, isDifficultyProfile } from '../game/generator'
+import { CAMPAIGN_LEVEL_COUNT, CAMPAIGN_VERSION } from '../game/campaign'
+import type { StarCount } from '../game/stars'
+import { starBoardFromRawOrRepair } from './starsPersist'
 import type {
 	PersistedActiveSession,
 	PersistedBoardV1,
 	PersistedCountersV1,
-	PersistedRootV1,
+	PersistedRootV2,
 } from './types'
-import { PERSIST_HISTORY_BOUND } from './types'
+import { PERSIST_HISTORY_BOUND, PERSIST_SCHEMA_VERSION } from './types'
 import { deserializeBoard } from './serialize'
 
 export type ValidateResult<T> =
@@ -111,7 +113,7 @@ function validateCounters(raw: unknown): ValidateResult<PersistedCountersV1> {
 	}
 }
 
-/** Validate an active session blob. */
+/** Validate an active session blob (Campaign v2 / gv3). */
 export function validateActiveSession(
 	raw: unknown,
 ): ValidateResult<PersistedActiveSession> {
@@ -145,6 +147,15 @@ export function validateActiveSession(
 	}
 	if (typeof raw.fingerprint !== 'string' || raw.fingerprint.length === 0) {
 		return { ok: false, reason: 'activeSession.fingerprint invalid' }
+	}
+	if (typeof raw.density !== 'number' || !isCampaignDensity(raw.density)) {
+		return { ok: false, reason: 'activeSession.density invalid' }
+	}
+	if (!isBoolean(raw.usedHint)) {
+		return { ok: false, reason: 'activeSession.usedHint invalid' }
+	}
+	if (!isBoolean(raw.usedUndo)) {
+		return { ok: false, reason: 'activeSession.usedUndo invalid' }
 	}
 
 	const board = validatePersistedBoard(raw.board)
@@ -209,10 +220,13 @@ export function validateActiveSession(
 		seed: raw.seed,
 		profile: raw.profile,
 		fingerprint: raw.fingerprint,
+		density: raw.density,
 		board: board.value,
 		history,
 		counters: counters.value,
 		nextCellSeq: raw.nextCellSeq,
+		usedHint: raw.usedHint,
+		usedUndo: raw.usedUndo,
 	}
 	if (initialBoard) {
 		return { ok: true, value: { ...session, initialBoard } }
@@ -221,19 +235,21 @@ export function validateActiveSession(
 }
 
 /**
- * Parse and validate a raw JSON string or object into PersistedRootV1.
- * Does not apply session/catalog semantic checks — see migrate / repository.
+ * Parse and validate a raw object into PersistedRootV2.
  */
 export function validatePersistedRoot(
 	raw: unknown,
-): ValidateResult<PersistedRootV1> {
+): ValidateResult<PersistedRootV2> {
 	if (!isObject(raw)) {
 		return { ok: false, reason: 'root must be an object' }
 	}
-	if (raw.schemaVersion !== 1) {
-		return { ok: false, reason: `unsupported schemaVersion: ${String(raw.schemaVersion)}` }
+	if (raw.schemaVersion !== PERSIST_SCHEMA_VERSION) {
+		return {
+			ok: false,
+			reason: `unsupported schemaVersion: ${String(raw.schemaVersion)}`,
+		}
 	}
-	if (raw.campaignVersion !== 1) {
+	if (raw.campaignVersion !== CAMPAIGN_VERSION) {
 		return {
 			ok: false,
 			reason: `unsupported campaignVersion: ${String(raw.campaignVersion)}`,
@@ -262,14 +278,20 @@ export function validatePersistedRoot(
 		activeSession = session.value
 	}
 
+	const bestStars = starBoardFromRawOrRepair(
+		raw.bestStars,
+		raw.highestCompletedLevel,
+	) as StarCount[]
+
 	return {
 		ok: true,
 		value: {
-			schemaVersion: 1,
-			campaignVersion: 1,
+			schemaVersion: PERSIST_SCHEMA_VERSION,
+			campaignVersion: CAMPAIGN_VERSION,
 			revision: raw.revision,
 			trainingCompleted: raw.trainingCompleted,
 			highestCompletedLevel: raw.highestCompletedLevel,
+			bestStars,
 			activeSession,
 		},
 	}
@@ -278,7 +300,7 @@ export function validatePersistedRoot(
 /** Parse a JSON text blob into a validated root (or failure). */
 export function parsePersistedRootJson(
 	text: string,
-): ValidateResult<PersistedRootV1> {
+): ValidateResult<PersistedRootV2> {
 	let parsed: unknown
 	try {
 		parsed = JSON.parse(text) as unknown

@@ -12,10 +12,12 @@ export type {
 	PersistedGameEnvelopeV1,
 	PersistedRoot,
 	PersistedRootV1,
+	PersistedRootV2,
 	PersistedSessionPurpose,
 	PersistedSessionStatus,
 	StorageAdapter,
 } from './types'
+export { PERSIST_SCHEMA_VERSION } from './types'
 
 export { createDefaultRoot } from './defaults'
 
@@ -47,6 +49,13 @@ export {
 	validateSessionSemantics,
 	buildActiveSession,
 } from './repository'
+
+export {
+	parseStarBoard,
+	repairStarBoard,
+	starBoardFromRawOrRepair,
+	PERSISTED_STAR_BOARD_LENGTH,
+} from './starsPersist'
 
 export { createMemoryAdapter, createFailingWriteAdapter } from './adapters/memory'
 export { createAsyncStorageAdapter } from './adapters/asyncStorage'

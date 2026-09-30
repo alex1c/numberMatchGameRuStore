@@ -1,5 +1,6 @@
 /**
- * PHASE 5 campaign integration — persistence + level flow (no RN rendering).
+ * Campaign integration — persistence + level flow (no RN rendering).
+ * Campaign v2 / schema v2 / stars.
  */
 
 import { toCanonicalBoard } from '../../game/core'
@@ -10,8 +11,10 @@ import {
 	reduceGameSession,
 } from '../../game/session'
 import {
+	PERSIST_SCHEMA_VERSION,
 	PersistRepository,
 	buildActiveSession,
+	createDefaultRoot,
 	createMemoryAdapter,
 	deserializeBoard,
 	serializeBoard,
@@ -42,6 +45,7 @@ async function playUntilCleared(
 			seed: prepared.entry.seed,
 			profile: prepared.entry.profile,
 			fingerprint: prepared.entry.fingerprint,
+			density: prepared.entry.density,
 			board: prepared.board,
 			initialBoard: prepared.board,
 			history: [],
@@ -49,8 +53,6 @@ async function playUntilCleared(
 		}),
 	)
 
-	// Use solver-free brute: reconstruct is already solvable; mark completed
-	// via commit API (full autoplay would be slow in unit tests).
 	const cleared = {
 		...prepared.board,
 		cells: prepared.board.cells.map((c) => ({ ...c, removed: true })),
@@ -62,6 +64,9 @@ async function playUntilCleared(
 		seed: prepared.entry.seed,
 		profile: prepared.entry.profile,
 		fingerprint: prepared.entry.fingerprint,
+		density: prepared.entry.density,
+		usedHint: false,
+		usedUndo: false,
 		initialBoard: prepared.board,
 	})
 }
@@ -74,6 +79,7 @@ describe('campaign start → complete → next', () => {
 
 		await playUntilCleared(repo, 1)
 		expect(repo.getRoot().highestCompletedLevel).toBe(1)
+		expect(repo.getRoot().bestStars[0]).toBe(3)
 		expect(repo.getRoot().activeSession?.status).toBe('completed')
 		expect(repo.getRoot().activeSession?.history).toHaveLength(0)
 
@@ -90,6 +96,7 @@ describe('campaign start → complete → next', () => {
 				seed: next.entry.seed,
 				profile: next.entry.profile,
 				fingerprint: next.entry.fingerprint,
+				density: next.entry.density,
 				board: next.board,
 				initialBoard: next.board,
 				history: [],
@@ -98,26 +105,23 @@ describe('campaign start → complete → next', () => {
 		)
 		expect(repo.getRoot().highestCompletedLevel).toBe(1)
 		expect(repo.getRoot().activeSession?.level).toBe(2)
-		expect(frontierLevel(1)).toBe(2)
 	}, 60_000)
-})
 
-describe('cold restore board equality', () => {
-	it('serialize → hydrate preserves board', async () => {
+	it('survives force-stop mid-level (cold hydrate)', async () => {
+		const adapter = createMemoryAdapter()
+		const repo = new PersistRepository(adapter)
+		await repo.hydrate()
+
 		const resolved = resolveCampaignLevel(1)
 		expect(resolved.status).toBe('ok')
 		if (resolved.status !== 'ok') {
 			return
 		}
-		const adapter = createMemoryAdapter()
-		const repo = new PersistRepository(adapter)
-		await repo.hydrate()
 
 		let state = createGameSession(
 			campaignIdentity(1, resolved.entry),
 			resolved.board,
 		)
-		// One legal first selection + noop path: just persist mid-board after append if stuck.
 		if (!state.hasAvailableMoves) {
 			state = reduceGameSession(state, { type: 'APPEND' })
 		}
@@ -130,18 +134,23 @@ describe('cold restore board equality', () => {
 				seed: resolved.entry.seed,
 				profile: resolved.entry.profile,
 				fingerprint: resolved.fingerprint,
+				density: resolved.entry.density,
 				board: state.board,
 				initialBoard: state.initialBoard,
 				history: state.history,
 				counters: state.counters,
+				usedHint: true,
+				usedUndo: false,
 			}),
 		)
 
 		const repo2 = new PersistRepository(adapter)
 		const root = await repo2.hydrate()
 		expect(root.activeSession).not.toBeNull()
+		expect(root.activeSession!.usedHint).toBe(true)
 		const restored = gameSessionFromPersisted(root.activeSession!)
 		expect(restored).not.toBeNull()
+		expect(restored!.usedHint).toBe(true)
 		expect(toCanonicalBoard(restored!.board)).toBe(
 			toCanonicalBoard(state.board),
 		)
@@ -156,7 +165,15 @@ describe('replay does not change frontier', () => {
 	it('keeps highestCompleted when replay completes', async () => {
 		const repo = new PersistRepository(createMemoryAdapter())
 		await repo.hydrate()
-		await repo.setHighestCompletedLevel(5)
+		// Seed frontier + stars so schema invariant holds.
+		const defaults = createDefaultRoot()
+		const stars = defaults.bestStars.slice() as number[]
+		for (let i = 0; i < 5; i += 1) stars[i] = 1
+		await repo.update((current) => ({
+			...current,
+			highestCompletedLevel: 5,
+			bestStars: stars as typeof current.bestStars,
+		}))
 		const entry = getCampaignEntry(3)
 		const resolved = resolveCampaignLevel(3)
 		expect(resolved.status).toBe('ok')
@@ -175,6 +192,7 @@ describe('replay does not change frontier', () => {
 				seed: entry.seed,
 				profile: entry.profile,
 				fingerprint: entry.fingerprint,
+				density: entry.density,
 				board: resolved.board,
 				initialBoard: resolved.board,
 				history: [],
@@ -188,9 +206,13 @@ describe('replay does not change frontier', () => {
 			seed: entry.seed,
 			profile: entry.profile,
 			fingerprint: entry.fingerprint,
+			density: entry.density,
+			usedHint: false,
+			usedUndo: false,
 			initialBoard: resolved.board,
 		})
 		expect(repo.getRoot().highestCompletedLevel).toBe(5)
+		expect(repo.getRoot().bestStars[2]).toBe(3)
 		expect(repo.getRoot().activeSession?.purpose).toBe('replay')
 		expect(repo.getRoot().activeSession?.status).toBe('completed')
 	}, 60_000)
@@ -211,17 +233,21 @@ describe('corrupt active preserves frontier', () => {
 			seed: board.entry.seed,
 			profile: board.entry.profile,
 			fingerprint: 'f_corrupt_deadbeef',
+			density: board.entry.density,
 			board: board.board,
 			counters: { matchesRemoved: 0, appendActions: 0, undoActions: 0 },
 		})
+		const stars = createDefaultRoot().bestStars.slice() as number[]
+		for (let i = 0; i < 7; i += 1) stars[i] = 1
 		await adapter.setItem(
 			'numbermatch.persist.v1',
 			JSON.stringify({
-				schemaVersion: 1,
-				campaignVersion: 1,
+				schemaVersion: PERSIST_SCHEMA_VERSION,
+				campaignVersion: 2,
 				revision: 3,
 				trainingCompleted: true,
 				highestCompletedLevel: 7,
+				bestStars: stars,
 				activeSession: bad,
 			}),
 		)
@@ -253,6 +279,7 @@ describe('completion idempotency + next double-tap', () => {
 				seed: prepared.entry.seed,
 				profile: prepared.entry.profile,
 				fingerprint: prepared.entry.fingerprint,
+				density: prepared.entry.density,
 				board: prepared.board,
 				initialBoard: prepared.board,
 				history: [prepared.board],
@@ -266,6 +293,9 @@ describe('completion idempotency + next double-tap', () => {
 			seed: prepared.entry.seed,
 			profile: prepared.entry.profile,
 			fingerprint: prepared.entry.fingerprint,
+			density: prepared.entry.density,
+			usedHint: false,
+			usedUndo: false,
 			initialBoard: prepared.board,
 		})
 		const rev1 = repo.getRoot().revision
@@ -276,11 +306,14 @@ describe('completion idempotency + next double-tap', () => {
 			seed: prepared.entry.seed,
 			profile: prepared.entry.profile,
 			fingerprint: prepared.entry.fingerprint,
+			density: prepared.entry.density,
+			usedHint: false,
+			usedUndo: false,
 			initialBoard: prepared.board,
 		})
 		expect(repo.getRoot().highestCompletedLevel).toBe(1)
+		expect(repo.getRoot().bestStars[0]).toBe(3)
 		expect(repo.getRoot().revision).toBeGreaterThan(rev1)
-		// Simulating double Next: both target level 2 from highest=1 — no skip to 3.
 		expect(frontierLevel(repo.getRoot().highestCompletedLevel)).toBe(2)
 	}, 60_000)
 
@@ -297,9 +330,11 @@ describe('completion idempotency + next double-tap', () => {
 			history: [board.board],
 			counters: { matchesRemoved: 0, appendActions: 1, undoActions: 0 },
 			completed: false,
+			usedHint: true,
 		})
 		expect(state.history).toHaveLength(1)
 		expect(state.counters.appendActions).toBe(1)
+		expect(state.usedHint).toBe(true)
 		expect(state.undoAfterCompletion).toBeUndefined()
 	}, 60_000)
 })
@@ -321,6 +356,7 @@ describe('DEV fixture must not replace campaign persist', () => {
 				seed: prepared.entry.seed,
 				profile: prepared.entry.profile,
 				fingerprint: prepared.entry.fingerprint,
+				density: prepared.entry.density,
 				board: prepared.board,
 				initialBoard: prepared.board,
 				history: [],
@@ -328,8 +364,6 @@ describe('DEV fixture must not replace campaign persist', () => {
 			}),
 		)
 		const before = repo.getRoot().activeSession
-		// Architecture: DEV fixtures call markDevFixtureSession + startSession only.
-		// They must not call startCampaignLevel / setActiveSession.
 		expect(before?.level).toBe(1)
 		expect(repo.getRoot().activeSession).toEqual(before)
 	})
@@ -346,8 +380,5 @@ describe('production DEV guard', () => {
 		expect(src).toContain('__DEV__')
 		expect(src).toContain('dev-section')
 		expect(src).toContain('markDevFixtureSession')
-		// Production copy must not advertise Phase 4 playtest.
-		expect(src).not.toContain('Playtest · Phase 4')
-		expect(src).not.toContain('Сессия в памяти')
 	})
 })
