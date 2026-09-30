@@ -40,10 +40,28 @@ export const strings = {
 	matches: 'Пары',
 	appends: 'Добавления',
 	undos: 'Отмены',
-	hintBusy: 'Ищем…',
+	hintBusy: 'Ищу…',
 	hintAppend: 'Добавьте числа',
 	hintUnavailable: 'Подсказка пока недоступна',
 	hintReady: 'Подсказка',
+	difficultyEasy: 'Легко',
+	difficultyMedium: 'Средне',
+	difficultyHard: 'Сложно',
+	difficultyExpert: 'Эксперт',
+	profileLabel: (profile: string): string => {
+		switch (profile) {
+			case 'EASY':
+				return 'Легко'
+			case 'MEDIUM':
+				return 'Средне'
+			case 'HARD':
+				return 'Сложно'
+			case 'EXPERT':
+				return 'Эксперт'
+			default:
+				return profile
+		}
+	},
 	statusSelect: 'Выберите число',
 	statusSelectSecond: 'Выберите пару',
 	statusStuck: 'Нет ходов — добавьте числа',

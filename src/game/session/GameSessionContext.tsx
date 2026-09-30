@@ -1,6 +1,5 @@
 /**
  * In-memory GameSession store — survives Home ↔ Game while process lives.
- * No AsyncStorage in PHASE 4.
  */
 
 import {
@@ -17,7 +16,17 @@ import {
 import { solveBoard, type SolverOptions } from '../solver'
 import type { BoardState } from '../core'
 import { strings } from '../../i18n/strings.ru'
-import { createGameSession, reduceGameSession } from './reducer'
+import {
+	createGameSession,
+	reduceGameSession,
+} from './reducer'
+import {
+	hintOutcomeFromSolveResult,
+	immediateHintIfStuck,
+	nowMs,
+	scheduleAfterPaint,
+	type HintOutcome,
+} from './hintRequest'
 import type {
 	GameSessionAction,
 	GameSessionState,
@@ -51,6 +60,22 @@ interface GameSessionContextValue {
 
 const GameSessionContext = createContext<GameSessionContextValue | null>(null)
 
+function applyHintOutcome(outcome: HintOutcome): GameSessionAction {
+	if (outcome.kind === 'match' && outcome.indices) {
+		return {
+			type: 'APPLY_HINT',
+			kind: 'match',
+			indices: outcome.indices,
+			message: outcome.message,
+		}
+	}
+	return {
+		type: 'APPLY_HINT',
+		kind: outcome.kind === 'append' ? 'append' : 'unavailable',
+		message: outcome.message,
+	}
+}
+
 export function GameSessionProvider({
 	children,
 }: {
@@ -59,10 +84,19 @@ export function GameSessionProvider({
 	const [session, setSession] = useState<GameSessionState | null>(null)
 	const sessionRef = useRef<GameSessionState | null>(null)
 	const hintInFlight = useRef(false)
+	const hintPaintCancel = useRef<{ cancel: () => void } | null>(null)
 
 	useEffect(() => {
 		sessionRef.current = session
 	}, [session])
+
+	useEffect(() => {
+		return () => {
+			hintPaintCancel.current?.cancel()
+			hintPaintCancel.current = null
+			hintInFlight.current = false
+		}
+	}, [])
 
 	const startSession = useCallback(
 		(
@@ -70,6 +104,8 @@ export function GameSessionProvider({
 			board: BoardState,
 			options?: { readonly undoAfterCompletion?: boolean },
 		) => {
+			hintPaintCancel.current?.cancel()
+			hintPaintCancel.current = null
 			hintInFlight.current = false
 			const next = createGameSession(identity, board)
 			const withPolicy =
@@ -89,6 +125,8 @@ export function GameSessionProvider({
 	)
 
 	const restoreSession = useCallback((state: GameSessionState) => {
+		hintPaintCancel.current?.cancel()
+		hintPaintCancel.current = null
 		hintInFlight.current = false
 		sessionRef.current = state
 		setSession(state)
@@ -106,6 +144,8 @@ export function GameSessionProvider({
 	}, [])
 
 	const clearSession = useCallback(() => {
+		hintPaintCancel.current?.cancel()
+		hintPaintCancel.current = null
 		hintInFlight.current = false
 		sessionRef.current = null
 		setSession(null)
@@ -113,107 +153,84 @@ export function GameSessionProvider({
 
 	const requestHint = useCallback(() => {
 		const current = sessionRef.current
-		if (!current || current.completed || current.hintBusy || hintInFlight.current) {
+		if (
+			!current ||
+			current.completed ||
+			current.hintBusy ||
+			hintInFlight.current
+		) {
 			return
 		}
-		hintInFlight.current = true
-		setSession((prev) =>
-			prev ? reduceGameSession(prev, { type: 'SET_HINT_BUSY', busy: true }) : prev,
-		)
 
-		// Explicit user action only — yield so UI can paint busy state first.
-		setTimeout(() => {
+		// Accept exactly one request; busy must paint before any solver work.
+		hintInFlight.current = true
+		const busyNext = reduceGameSession(current, {
+			type: 'SET_HINT_BUSY',
+			busy: true,
+		})
+		sessionRef.current = busyNext
+		setSession(busyNext)
+
+		const finish = (outcome: HintOutcome, elapsedMs?: number) => {
+			if (__DEV__ && elapsedMs !== undefined) {
+				console.log(
+					`[NumberMatch] Hint: ${Math.round(elapsedMs)} ms` +
+						(outcome.skippedSolver ? ' (stuck→Add, no solver)' : ''),
+				)
+			}
+			setSession((prev) => {
+				if (!prev) {
+					return prev
+				}
+				const next = reduceGameSession(prev, applyHintOutcome(outcome))
+				sessionRef.current = next
+				return next
+			})
+			hintInFlight.current = false
+			hintPaintCancel.current = null
+		}
+
+		// Fast path: already stuck → emphasize Add, skip expensive solver.
+		const stuck = immediateHintIfStuck(current.board, current.completed)
+		if (stuck) {
+			hintPaintCancel.current = scheduleAfterPaint(() => {
+				finish(stuck, 0)
+			})
+			return
+		}
+
+		hintPaintCancel.current = scheduleAfterPaint(() => {
 			const live = sessionRef.current
-			if (!live) {
+			if (!live || live.completed) {
 				hintInFlight.current = false
+				hintPaintCancel.current = null
 				return
 			}
+			const started = nowMs()
 			try {
 				const result = solveBoard(live.board, HINT_SOLVER_OPTIONS)
-				if (result.status === 'solved' && result.path[0]) {
-					const first = result.path[0]
-					if (first.type === 'match') {
-						setSession((prev) =>
-							prev
-								? reduceGameSession(prev, {
-										type: 'APPLY_HINT',
-										kind: 'match',
-										indices: [first.aIndex, first.bIndex],
-										message: strings.hintReady,
-									})
-								: prev,
-						)
-					} else {
-						setSession((prev) =>
-							prev
-								? reduceGameSession(prev, {
-										type: 'APPLY_HINT',
-										kind: 'append',
-										message: strings.hintAppend,
-									})
-								: prev,
-						)
-					}
-				} else if (result.status === 'cutoff') {
-					if (__DEV__) {
-						console.warn(
-							`[NumberMatch] hint cutoff ${result.reason} ` +
-								`explored=${result.stats.exploredStates}`,
-						)
-					}
-					setSession((prev) =>
-						prev
-							? reduceGameSession(prev, {
-									type: 'APPLY_HINT',
-									kind: 'unavailable',
-									message: strings.hintUnavailable,
-								})
-							: prev,
-					)
-				} else if (result.status === 'unsolvable') {
-					if (__DEV__) {
-						console.warn('[NumberMatch] hint unsolvable on proven fixture')
-					}
-					setSession((prev) =>
-						prev
-							? reduceGameSession(prev, {
-									type: 'APPLY_HINT',
-									kind: 'unavailable',
-									message: strings.hintUnavailable,
-								})
-							: prev,
-					)
-				} else {
-					if (__DEV__) {
-						console.warn('[NumberMatch] hint invalid', result)
-					}
-					setSession((prev) =>
-						prev
-							? reduceGameSession(prev, {
-									type: 'APPLY_HINT',
-									kind: 'unavailable',
-									message: strings.hintUnavailable,
-								})
-							: prev,
+				const elapsed = nowMs() - started
+				if (__DEV__ && elapsed >= 1000) {
+					console.warn(
+						`[NumberMatch] SOLVER PERFORMANCE FOLLOW-UP REQUIRED — Hint ${Math.round(elapsed)} ms`,
 					)
 				}
+				finish(hintOutcomeFromSolveResult(result), elapsed)
 			} catch (err) {
 				if (__DEV__) {
 					console.warn('[NumberMatch] hint error', err)
 				}
-				setSession((prev) =>
-					prev
-						? reduceGameSession(prev, {
-								type: 'APPLY_HINT',
-								kind: 'unavailable',
-								message: strings.hintUnavailable,
-							})
-						: prev,
+				finish(
+					{
+						kind: 'unavailable',
+						message: strings.hintUnavailable,
+						delivered: false,
+						skippedSolver: false,
+					},
+					nowMs() - started,
 				)
-			} finally {
-				hintInFlight.current = false
 			}
-		}, 0)
+		})
 	}, [])
 
 	const isDirty = Boolean(

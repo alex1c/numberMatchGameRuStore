@@ -339,13 +339,12 @@ export function GameScreen({
 		: isDensityLab && densityMeta
 			? densityMeta.label
 			: strings.appName
+	// Campaign: level + optional difficulty only — never seed/fingerprint.
 	const headerSubtitle = isCampaign
-		? __DEV__
-			? `${session.identity.profile} · seed ${session.identity.seed}`
-			: undefined
+		? strings.profileLabel(session.identity.profile)
 		: isDensityLab
 			? session.identity.label
-			: `${session.identity.label}`
+			: session.identity.label
 
 	const showNext =
 		isCampaign &&
@@ -387,10 +386,11 @@ export function GameScreen({
 				onHome={onHome}
 			/>
 
-			{__DEV__ && !isCampaign ? (
-				<View style={styles.meta}>
+			{__DEV__ ? (
+				<View style={styles.meta} testID="game-dev-meta">
 					<Text style={[styles.metaText, { color: theme.colors.textMuted }]}>
 						{session.identity.profile} · seed {session.identity.seed}
+						{` · fp ${session.identity.fingerprint}`}
 						{` · ${session.counters.matchesRemoved}п/${session.counters.appendActions}+`}
 					</Text>
 				</View>
@@ -419,7 +419,7 @@ export function GameScreen({
 					canUndo={session.history.length > 0}
 					canAppend={appendEnabled}
 					appendPrimary={appendEnabled}
-					canHint={!session.hintBusy}
+					canHint={true}
 					hintBusy={session.hintBusy}
 					onUndo={() => dispatch({ type: 'UNDO' })}
 					onAppend={handleAppend}
@@ -497,6 +497,9 @@ function resolveStatus(
 ): string {
 	if (session.statusMessage === 'cleared' || session.completed) {
 		return strings.statusCleared
+	}
+	if (session.hintBusy) {
+		return strings.hintBusy
 	}
 	if (session.statusMessage === strings.hintAppend) {
 		return strings.hintAppend

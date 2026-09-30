@@ -12,6 +12,16 @@ export {
 
 export { createGameSession, hydrateGameSession, reduceGameSession } from './reducer'
 
+export {
+	APPEND_PULSE_REPETITIONS,
+	hintOutcomeFromSolveResult,
+	immediateHintIfStuck,
+	nowMs,
+	scheduleAfterPaint,
+	shouldStartAppendPulse,
+} from './hintRequest'
+export type { HintKind, HintOutcome } from './hintRequest'
+
 export { GameSessionProvider, useGameSession } from './GameSessionContext'
 
 export {

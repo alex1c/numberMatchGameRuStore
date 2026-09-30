@@ -145,6 +145,14 @@ export const DEV_EXTENDED_FIXTURES: readonly PlaytestFixture[] = [
 		seed: 10016,
 	},
 	{
+		id: 'hint-stress-expert',
+		label: 'Hint stress EXPERT',
+		note: 'DEV Hint latency — heavy EXPERT gv2; tap Подсказка and read console Hint: N ms',
+		kind: 'generated',
+		profile: 'EXPERT',
+		seed: 10016,
+	},
+	{
 		id: 'physical-gap-regression',
 		label: 'physical-gap-regression',
 		note: '2 6 / . . . 2 6 — compatible values, no legal line; DEV QA',

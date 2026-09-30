@@ -1,10 +1,24 @@
 /**
  * Fixed bottom gameplay controls — outside board ScrollView.
+ * When stuck, Add becomes primary and briefly pulses for attention.
  */
 
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+	AccessibilityInfo,
+	ActivityIndicator,
+	Animated,
+	Pressable,
+	StyleSheet,
+	Text,
+	View,
+} from 'react-native'
 
 import { strings } from '../../i18n/strings.ru'
+import {
+	APPEND_PULSE_REPETITIONS,
+	shouldStartAppendPulse,
+} from '../../game/session/hintRequest'
 import { spacing, typography, useTheme } from '../../theme'
 
 interface GameControlsProps {
@@ -28,6 +42,102 @@ export function GameControls({
 	onAppend,
 	onHint,
 }: GameControlsProps) {
+	const theme = useTheme()
+	const scale = useMemo(() => new Animated.Value(1), [])
+	const pulseAnim = useRef<Animated.CompositeAnimation | null>(null)
+	const prevPrimary = useRef(false)
+	const [reduceMotion, setReduceMotion] = useState(false)
+
+	useEffect(() => {
+		let mounted = true
+		AccessibilityInfo.isReduceMotionEnabled()
+			.then((enabled) => {
+				if (mounted) {
+					setReduceMotion(enabled)
+				}
+			})
+			.catch(() => {
+				/* ignore — treat as motion allowed */
+			})
+		const sub = AccessibilityInfo.addEventListener?.(
+			'reduceMotionChanged',
+			(enabled: boolean) => {
+				setReduceMotion(enabled)
+			},
+		)
+		return () => {
+			mounted = false
+			sub?.remove?.()
+		}
+	}, [])
+
+	const stopPulse = () => {
+		pulseAnim.current?.stop()
+		pulseAnim.current = null
+		scale.stopAnimation()
+		scale.setValue(1)
+	}
+
+	useEffect(() => {
+		const shouldPulse = shouldStartAppendPulse(
+			prevPrimary.current,
+			appendPrimary && canAppend,
+		)
+		prevPrimary.current = appendPrimary && canAppend
+
+		if (!shouldPulse || reduceMotion) {
+			if (!(appendPrimary && canAppend)) {
+				stopPulse()
+			}
+			return
+		}
+
+		stopPulse()
+		const sequence: Animated.CompositeAnimation[] = []
+		for (let i = 0; i < APPEND_PULSE_REPETITIONS; i += 1) {
+			sequence.push(
+				Animated.sequence([
+					Animated.timing(scale, {
+						toValue: 1.06,
+						duration: 180,
+						useNativeDriver: true,
+					}),
+					Animated.timing(scale, {
+						toValue: 1,
+						duration: 180,
+						useNativeDriver: true,
+					}),
+				]),
+			)
+		}
+		const anim = Animated.sequence(sequence)
+		pulseAnim.current = anim
+		anim.start(({ finished }) => {
+			if (finished) {
+				pulseAnim.current = null
+				scale.setValue(1)
+			}
+		})
+
+		return () => {
+			stopPulse()
+		}
+		// Only react to primary/stuck transitions — not every parent render.
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+	}, [appendPrimary, canAppend, reduceMotion])
+
+	useEffect(() => {
+		return () => {
+			stopPulse()
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- unmount cleanup
+	}, [])
+
+	const handleAppend = () => {
+		stopPulse()
+		onAppend()
+	}
+
 	return (
 		<View style={styles.row} testID="game-controls">
 			<ControlButton
@@ -37,18 +147,25 @@ export function GameControls({
 				onPress={onUndo}
 				testID="btn-undo"
 			/>
-			<ControlButton
-				label={strings.addNumbers}
-				a11y={strings.addNumbersA11y}
-				disabled={!canAppend}
-				primary={appendPrimary && canAppend}
-				onPress={onAppend}
-				testID="btn-append"
-			/>
+			<Animated.View
+				style={[styles.appendWrap, { transform: [{ scale }] }]}
+				testID="btn-append-pulse"
+			>
+				<ControlButton
+					label={strings.addNumbers}
+					a11y={strings.addNumbersA11y}
+					disabled={!canAppend}
+					primary={appendPrimary && canAppend}
+					onPress={handleAppend}
+					testID="btn-append"
+				/>
+			</Animated.View>
 			<ControlButton
 				label={hintBusy ? strings.hintBusy : strings.hint}
 				a11y={strings.hint}
-				disabled={!canHint || hintBusy}
+				disabled={!canHint}
+				busy={hintBusy}
+				busyColor={theme.colors.text}
 				onPress={onHint}
 				testID="btn-hint"
 			/>
@@ -61,6 +178,8 @@ interface ControlButtonProps {
 	readonly a11y: string
 	readonly disabled: boolean
 	readonly primary?: boolean
+	readonly busy?: boolean
+	readonly busyColor?: string
 	readonly onPress: () => void
 	readonly testID: string
 }
@@ -70,46 +189,67 @@ function ControlButton({
 	a11y,
 	disabled,
 	primary = false,
+	busy = false,
+	busyColor,
 	onPress,
 	testID,
 }: ControlButtonProps) {
 	const theme = useTheme()
-	const backgroundColor = disabled
-		? theme.colors.controlDisabled
-		: primary
-			? theme.colors.controlPrimary
-			: theme.colors.controlSecondary
-	const color = disabled
-		? theme.colors.controlDisabledText
-		: primary
-			? theme.colors.controlPrimaryText
-			: theme.colors.text
+	const backgroundColor =
+		disabled && !busy
+			? theme.colors.controlDisabled
+			: primary
+				? theme.colors.controlPrimary
+				: theme.colors.controlSecondary
+	const color =
+		disabled && !busy
+			? theme.colors.controlDisabledText
+			: primary
+				? theme.colors.controlPrimaryText
+				: theme.colors.text
 
 	return (
 		<Pressable
 			onPress={onPress}
-			disabled={disabled}
+			disabled={disabled || busy}
 			accessibilityRole="button"
 			accessibilityLabel={a11y}
-			accessibilityState={{ disabled }}
+			accessibilityState={{ disabled: disabled || busy, busy }}
 			style={[
 				styles.button,
 				{
 					backgroundColor,
 					borderColor: theme.colors.border,
-					opacity: disabled ? 0.85 : 1,
+					opacity: disabled && !busy ? 0.85 : 1,
 				},
 			]}
 			testID={testID}
 		>
-			<Text
-				style={[styles.label, { color }]}
-				numberOfLines={1}
-				allowFontScaling
-				maxFontSizeMultiplier={1.3}
-			>
-				{label}
-			</Text>
+			{busy ? (
+				<View style={styles.busyRow} testID="hint-busy-indicator">
+					<ActivityIndicator
+						size="small"
+						color={busyColor ?? color}
+					/>
+					<Text
+						style={[styles.label, { color }]}
+						numberOfLines={1}
+						allowFontScaling
+						maxFontSizeMultiplier={1.3}
+					>
+						{label}
+					</Text>
+				</View>
+			) : (
+				<Text
+					style={[styles.label, { color }]}
+					numberOfLines={1}
+					allowFontScaling
+					maxFontSizeMultiplier={1.3}
+				>
+					{label}
+				</Text>
+			)}
 		</Pressable>
 	)
 }
@@ -122,14 +262,23 @@ const styles = StyleSheet.create({
 		paddingTop: spacing.sm,
 		paddingBottom: spacing.sm,
 	},
+	appendWrap: {
+		flex: 1,
+	},
 	button: {
 		flex: 1,
+		alignSelf: 'stretch',
 		minHeight: 48,
 		borderRadius: 10,
 		borderWidth: StyleSheet.hairlineWidth,
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: spacing.sm,
+	},
+	busyRow: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
 	},
 	label: {
 		...typography.body,
