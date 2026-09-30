@@ -39,6 +39,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 	const theme = useTheme()
 	const {
 		highestCompletedLevel,
+		totalStars,
 		activeSession,
 		sessionSource,
 		startCampaignLevel,
@@ -195,6 +196,12 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 							highestCompletedLevel,
 							CAMPAIGN_LEVEL_COUNT,
 						)}
+			</Text>
+			<Text
+				style={[styles.note, { color: theme.colors.textMuted }]}
+				testID="home-stars-total"
+			>
+				{strings.starsMastery(totalStars, CAMPAIGN_LEVEL_COUNT * 3)}
 			</Text>
 			{!campaignDone ? (
 				<Text style={[styles.note, { color: theme.colors.textMuted }]}>

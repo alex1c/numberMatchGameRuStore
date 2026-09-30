@@ -1,7 +1,7 @@
 /**
- * Production Game screen (PHASE 5 campaign flow).
- * Layout: SAFE TOP → HEADER → META → BOARD → STATUS → CONTROLS → SAFE BOTTOM
- * Default: no Game banner. DEV may toggle reserve slot for measurement.
+ * Production Game screen (PHASE 5 campaign flow + Campaign v2 stars).
+ * Layout: SAFE TOP → HEADER → META → BOARD → STATUS → CONTROLS
+ * BannerSlot is owned by AppShell below this screen (above bottom inset).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -16,14 +16,14 @@ import {
 import { useAppState } from '../app'
 import { CAMPAIGN_LEVEL_COUNT } from '../game/campaign'
 import { DENSITY_FIXTURES, loadDensityFixture } from '../dev/density'
-import { BannerSlot } from '../components/BannerSlot'
 import { CompletionOverlay } from '../components/game/CompletionOverlay'
 import { GameControls } from '../components/game/GameControls'
 import { GameHeader } from '../components/game/GameHeader'
 import { NumberBoard } from '../components/game/NumberBoard'
 import { strings } from '../i18n/strings.ru'
+import { starsFromAttempt } from '../game/stars'
 import { useGameSession } from '../game/session/GameSessionContext'
-import { BANNER_SLOT_HEIGHT, spacing, typography, useTheme } from '../theme'
+import { spacing, typography, useTheme } from '../theme'
 
 interface GameScreenProps {
 	readonly onHome: () => void
@@ -35,10 +35,9 @@ interface GameScreenProps {
 }
 
 /**
- * DEV-only geometry experiment. Production always false — no empty 50px hole.
+ * DEV-only geometry experiment flag — production Game uses AppShell BannerSlot.
  */
-const DEV_GAME_BANNER_EXPERIMENT =
-	typeof __DEV__ !== 'undefined' && __DEV__ ? false : false
+const DEV_SHOW_COORDS_DEFAULT = false
 
 export function GameScreen({
 	onHome,
@@ -67,8 +66,7 @@ export function GameScreen({
 		string | null
 	>(null)
 	const [scrollToEndToken, setScrollToEndToken] = useState(0)
-	const [showBannerSlot, setShowBannerSlot] = useState(DEV_GAME_BANNER_EXPERIMENT)
-	const [showDevCoords, setShowDevCoords] = useState(false)
+	const [showDevCoords, setShowDevCoords] = useState(DEV_SHOW_COORDS_DEFAULT)
 	const [nextBusy, setNextBusy] = useState(false)
 	const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -430,41 +428,37 @@ export function GameScreen({
 			) : null}
 
 			{__DEV__ ? (
-				<>
-					<Pressable
-						onPress={() => setShowBannerSlot((v) => !v)}
-						style={styles.devToggle}
-						testID="dev-banner-toggle"
-					>
-						<Text style={{ color: theme.colors.textMuted, fontSize: 11 }}>
-							DEV BannerSlot {showBannerSlot ? 'ON' : 'OFF'} ({BANNER_SLOT_HEIGHT}
-							px)
-						</Text>
-					</Pressable>
-					<Pressable
-						onPress={() => setShowDevCoords((v) => !v)}
-						style={styles.devToggle}
-						testID="dev-coords-toggle"
-					>
-						<Text style={{ color: theme.colors.textMuted, fontSize: 11 }}>
-							DEV coords {showDevCoords ? 'ON' : 'OFF'}
-						</Text>
-					</Pressable>
-				</>
+				<Pressable
+					onPress={() => setShowDevCoords((v) => !v)}
+					style={styles.devToggle}
+					testID="dev-coords-toggle"
+				>
+					<Text style={{ color: theme.colors.textMuted, fontSize: 11 }}>
+						DEV coords {showDevCoords ? 'ON' : 'OFF'}
+					</Text>
+				</Pressable>
 			) : null}
-
-			{showBannerSlot ? <BannerSlot visible /> : null}
 
 			<CompletionOverlay
 				visible={showCompletion}
 				title={completionTitle}
 				body={
-					isCampaign && campaignLevel === CAMPAIGN_LEVEL_COUNT
-						? strings.campaignComplete
+					isCampaign
+						? strings.levelCompletedTitle(campaignLevel ?? 0)
 						: strings.completedBody
 				}
 				counters={session.counters}
 				mode={completionMode}
+				attemptStars={
+					isCampaign
+						? starsFromAttempt({
+								usedHint: session.usedHint,
+								usedUndo: session.usedUndo,
+							})
+						: undefined
+				}
+				usedHint={session.usedHint}
+				usedUndo={session.usedUndo}
 				showNext={showNext}
 				nextLabel={
 					campaignLevel === CAMPAIGN_LEVEL_COUNT

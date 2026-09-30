@@ -78,9 +78,7 @@ function AppShell() {
 	const { startSession } = useGameSession()
 	const nav = useAppNavigation(initialRoute)
 	const showBanner =
-		nav.current !== 'training' &&
-		nav.current !== 'game' &&
-		nav.current !== 'densityLab'
+		nav.current !== 'training' && nav.current !== 'densityLab'
 
 	const startLevel1FromTraining = async () => {
 		const result = await startCampaignLevel(1, 'progression')

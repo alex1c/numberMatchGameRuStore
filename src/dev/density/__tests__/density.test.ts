@@ -155,6 +155,7 @@ describe('density lab isolation', () => {
 				seed: level.entry.seed,
 				profile: level.entry.profile,
 				fingerprint: level.entry.fingerprint,
+				density: level.entry.density,
 				board: level.board,
 				initialBoard: level.board,
 				history: [],
@@ -175,8 +176,8 @@ describe('density lab isolation', () => {
 		expect(after.revision).toBe(before.revision)
 	})
 
-	it('campaign signature constant remains cs6e442b58', () => {
-		expect(CAMPAIGN_CATALOG_SIGNATURE).toBe('cs6e442b58')
+	it('campaign signature constant is Campaign v2 cs71c703ce', () => {
+		expect(CAMPAIGN_CATALOG_SIGNATURE).toBe('cs71c703ce')
 	})
 
 	it('Density Lab entry is DEV-gated in Home source', () => {

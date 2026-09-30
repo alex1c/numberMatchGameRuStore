@@ -55,6 +55,7 @@ export const strings = {
 	trainingNote: 'Короткое интерактивное обучение',
 	progressCleared: (cleared: number, total: number) =>
 		`Пройдено: ${cleared} из ${total}`,
+	starsMastery: (earned: number, max: number) => `★ ${earned} / ${max}`,
 	progressLevel: (level: number, total: number) =>
 		`Уровень ${level} из ${total}`,
 	continueLevel: (level: number) => `Продолжить уровень ${level}`,

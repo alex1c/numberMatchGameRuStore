@@ -18,6 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useAppState } from '../app'
 import { CAMPAIGN_LEVEL_COUNT } from '../game/campaign'
+import { StarsRow } from '../components/game/StarsRow'
+import type { StarCount } from '../game/stars'
 import { useGameSession } from '../game/session/GameSessionContext'
 import { strings } from '../i18n/strings.ru'
 import { BANNER_SLOT_HEIGHT, spacing, typography, useTheme } from '../theme'
@@ -46,6 +48,7 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 	const { width } = useWindowDimensions()
 	const {
 		highestCompletedLevel,
+		bestStars,
 		activeSession,
 		startCampaignLevel,
 		sessionSource,
@@ -230,6 +233,12 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 					testID={`level-cell-${level}`}
 				>
 					<Text style={[styles.cellText, { color: fg }]}>{level}</Text>
+					{state === 'completed' ? (
+						<StarsRow
+							stars={(bestStars[level - 1] ?? 0) as StarCount}
+							size="sm"
+						/>
+					) : null}
 					{state === 'active' || state === 'replay_active' ? (
 						<View
 							style={[
@@ -241,7 +250,7 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 				</Pressable>
 			)
 		},
-		[a11yFor, cellSize, onPressLevel, resolveState, theme],
+		[a11yFor, bestStars, cellSize, onPressLevel, resolveState, theme],
 	)
 
 	const bottomPad = insets.bottom + BANNER_SLOT_HEIGHT + spacing.lg

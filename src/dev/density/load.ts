@@ -4,8 +4,8 @@
  */
 
 import {
-	DIFFICULTY_PROFILE_VERSION,
-	GENERATION_VERSION,
+	DIFFICULTY_PROFILE_VERSION_V1,
+	GENERATION_VERSION_V2,
 	generatePuzzle,
 	puzzleFingerprint,
 } from '../../game/generator'
@@ -50,9 +50,11 @@ export function loadDensityFixture(
 	let board: BoardState
 
 	if (meta.kind === 'baseline-easy') {
+		// Historical sparse EASY baseline — always gv2 (no density).
 		const generated = generatePuzzle({
 			seed: meta.seed,
 			profile: 'EASY',
+			generationVersion: GENERATION_VERSION_V2,
 			maxCandidateAttempts: 80,
 			deadEndAnalysis: false,
 		})
@@ -71,7 +73,8 @@ export function loadDensityFixture(
 		)
 	}
 
-	const { fingerprint } = puzzleFingerprint(board)
+	// Fingerprints for experimental boards were frozen under gv2 canonical prefix.
+	const { fingerprint } = puzzleFingerprint(board, GENERATION_VERSION_V2)
 	if (fingerprint !== meta.fingerprint) {
 		return {
 			ok: false,
@@ -87,8 +90,8 @@ export function loadDensityFixture(
 	}
 
 	const identity: SessionPuzzleIdentity = {
-		generationVersion: GENERATION_VERSION,
-		difficultyProfileVersion: DIFFICULTY_PROFILE_VERSION,
+		generationVersion: GENERATION_VERSION_V2,
+		difficultyProfileVersion: DIFFICULTY_PROFILE_VERSION_V1,
 		seed: meta.seed,
 		profile: meta.kind === 'baseline-easy' ? 'EASY' : 'CUSTOM',
 		fingerprint,

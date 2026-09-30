@@ -6,7 +6,9 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { strings } from '../../i18n/strings.ru'
 import type { SessionCounters } from '../../game/session'
+import type { StarCount } from '../../game/stars'
 import { spacing, typography, useTheme } from '../../theme'
+import { StarChecklist, StarsRow } from './StarsRow'
 
 export type CompletionMode = 'campaign_progression' | 'campaign_replay' | 'dev'
 
@@ -16,6 +18,10 @@ interface CompletionOverlayProps {
 	readonly body?: string
 	readonly counters: SessionCounters
 	readonly mode: CompletionMode
+	/** Attempt stars earned this clear (1..3). */
+	readonly attemptStars?: StarCount
+	readonly usedHint?: boolean
+	readonly usedUndo?: boolean
 	/** Campaign progression: show Next when there is a next level. */
 	readonly showNext?: boolean
 	readonly nextLabel?: string
@@ -39,6 +45,9 @@ export function CompletionOverlay({
 	body,
 	counters,
 	mode,
+	attemptStars,
+	usedHint = false,
+	usedUndo = false,
 	showNext = false,
 	nextLabel,
 	nextBusy = false,
@@ -77,12 +86,22 @@ export function CompletionOverlay({
 							{body}
 						</Text>
 					) : null}
-					<Text style={[styles.meta, { color: theme.colors.textMuted }]}>
-						{strings.completionStats(
-							counters.matchesRemoved,
-							counters.appendActions,
-						)}
-					</Text>
+					{isCampaign && attemptStars !== undefined ? (
+						<>
+							<View style={styles.starsWrap}>
+								<StarsRow stars={attemptStars} size="lg" testID="completion-stars" />
+							</View>
+							<StarChecklist usedHint={usedHint} usedUndo={usedUndo} />
+						</>
+					) : null}
+					{!isCampaign ? (
+						<Text style={[styles.meta, { color: theme.colors.textMuted }]}>
+							{strings.completionStats(
+								counters.matchesRemoved,
+								counters.appendActions,
+							)}
+						</Text>
+					) : null}
 					<View style={styles.actions}>
 						{showNext && onNext ? (
 							<Action
@@ -192,6 +211,10 @@ const styles = StyleSheet.create({
 		borderRadius: 16,
 		padding: spacing.lg,
 		gap: spacing.sm,
+	},
+	starsWrap: {
+		alignItems: 'center',
+		marginVertical: spacing.xs,
 	},
 	title: {
 		...typography.title,
