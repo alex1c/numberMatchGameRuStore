@@ -46,6 +46,7 @@ export function resolveCampaignLevel(
 		generationVersion: GENERATION_VERSION,
 		seed: entry.seed,
 		profile: entry.profile,
+		density: entry.density,
 		expectedFingerprint: entry.fingerprint,
 	})
 

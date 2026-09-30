@@ -3,7 +3,11 @@
  * Builder / audit CLIs are Node entrypoints — not re-exported here for RN.
  */
 
-export { CAMPAIGN_VERSION, CAMPAIGN_LEVEL_COUNT } from './version'
+export {
+	CAMPAIGN_VERSION,
+	CAMPAIGN_VERSION_V1,
+	CAMPAIGN_LEVEL_COUNT,
+} from './version'
 export type { CampaignEntry, CampaignLearningRole } from './types'
 
 export {
@@ -13,7 +17,9 @@ export {
 
 export {
 	profileForLevel,
+	densityForLevel,
 	countProfilesInCampaign,
+	countDensitiesInCampaign,
 	maxExpertStreak,
 } from './rhythm'
 

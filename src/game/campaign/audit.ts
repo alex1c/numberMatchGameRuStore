@@ -116,6 +116,7 @@ export function auditCampaignCatalog(
 			generationVersion: GENERATION_VERSION,
 			seed: entry.seed,
 			profile: entry.profile,
+			density: entry.density,
 			expectedFingerprint: entry.fingerprint,
 		})
 		if (reconstructed.status !== 'ok') {
@@ -144,6 +145,8 @@ export function auditCampaignCatalog(
 			const generated = generatePuzzle({
 				seed: entry.seed,
 				profile: entry.profile,
+				generationVersion: GENERATION_VERSION,
+				density: entry.density,
 				knownFingerprints: new Set(),
 				knownCanonicals: new Set(),
 				deadEndAnalysis: false,

@@ -19,10 +19,11 @@ import {
 	GENERATION_VERSION,
 	generatePuzzle,
 	type AcceptedPuzzle,
+	type CampaignDensity,
 	type DifficultyProfile,
 } from '../generator'
 import { computeCampaignSignature } from './signature'
-import { profileForLevel } from './rhythm'
+import { densityForLevel, profileForLevel } from './rhythm'
 import type { CampaignEntry, CampaignLearningRole } from './types'
 import { CAMPAIGN_LEVEL_COUNT, CAMPAIGN_VERSION } from './version'
 
@@ -164,12 +165,14 @@ function seedForAttempt(
 function toEntry(
 	level: number,
 	puzzle: AcceptedPuzzle,
+	density: CampaignDensity,
 	learningRole?: CampaignLearningRole,
 ): CampaignEntry {
 	const entry: CampaignEntry = {
 		level,
 		seed: puzzle.identity.seed,
 		profile: puzzle.identity.profile,
+		density,
 		fingerprint: puzzle.identity.fingerprint,
 		difficultyScore: puzzle.metrics.difficultyScore,
 		solutionDepth: puzzle.metrics.solutionActionCount,
@@ -207,9 +210,10 @@ export function buildCampaignCatalog(
 		// Prefer EASY for the first 10 regardless of the long-form rhythm.
 		const profile: DifficultyProfile =
 			level <= 10 ? 'EASY' : profileForLevel(level)
+		const density = densityForLevel(level)
 		const preferredRole =
 			level <= 10 ? EARLY_LEARNING_GOALS[level - 1] : undefined
-		// §§362/370: keep Add burden low before L9; L9 should need Add.
+		// Keep Add burden low before L9; L9 prefers Add when readable.
 		const preferNoAppend = level >= 1 && level <= 8
 		const preferAppend = level === 9
 		// Extra seed budget while hunting early teaching goals.
@@ -220,14 +224,19 @@ export function buildCampaignCatalog(
 		let acceptedRole: CampaignLearningRole | undefined
 		let fallback: AcceptedPuzzle | null = null
 		let fallbackRole: CampaignLearningRole | undefined
-		let scoredFallback: { puzzle: AcceptedPuzzle; role?: CampaignLearningRole; score: number } | null =
-			null
+		let scoredFallback: {
+			puzzle: AcceptedPuzzle
+			role?: CampaignLearningRole
+			score: number
+		} | null = null
 
 		for (let attempt = 0; attempt < levelSeedAttempts; attempt += 1) {
 			const seed = seedForAttempt(baseSeed, level, attempt)
 			const result = generatePuzzle({
 				seed,
 				profile,
+				generationVersion: GENERATION_VERSION,
+				density,
 				maxCandidateAttempts,
 				knownFingerprints,
 				knownCanonicals,
@@ -258,9 +267,10 @@ export function buildCampaignCatalog(
 			if (preferAppend && appends === 0) score -= 30
 			if (matchesPreferred) score += 100
 			if (role && !claimedLearning.has(role)) score += 10
-			// Prefer modest boards for the opening stretch.
-			if (level <= 10 && puzzle.metrics.maxRowsDuringSolution <= 4) score += 5
-			if (level <= 10 && puzzle.metrics.solutionActionCount <= 12) score += 3
+			// Prefer approachable early boards (more forced, fewer appends).
+			if (level <= 20 && puzzle.metrics.forcedRatio >= 0.15) score += 8
+			if (level <= 20 && puzzle.metrics.initialLegalMoves >= 8) score += 5
+			if (level <= 10 && appends === 0) score += 5
 
 			if (!scoredFallback || score > scoredFallback.score) {
 				scoredFallback = { puzzle, role, score }
@@ -292,7 +302,9 @@ export function buildCampaignCatalog(
 					? { puzzle: fallback, role: fallbackRole }
 					: null
 		if (!best) {
-			errors.push(`level ${level} (${profile}): no accepted puzzle`)
+			errors.push(
+				`level ${level} (${profile}, ${density} rows): no accepted puzzle`,
+			)
 			break
 		}
 
@@ -309,7 +321,7 @@ export function buildCampaignCatalog(
 			claimedLearning.add(learningRole)
 		}
 
-		const entry = toEntry(level, best.puzzle, learningRole)
+		const entry = toEntry(level, best.puzzle, density, learningRole)
 		entries.push(entry)
 		options.onProgress?.({
 			level,
@@ -356,7 +368,7 @@ export function formatCatalogSource(
 				? `, learningRole: '${entry.learningRole}'`
 				: ''
 		lines.push(
-			`\t{ level: ${entry.level}, seed: ${entry.seed}, profile: '${entry.profile}', fingerprint: '${entry.fingerprint}', difficultyScore: ${entry.difficultyScore}, solutionDepth: ${entry.solutionDepth}, appendCount: ${entry.appendCount}, maxRows: ${entry.maxRows}${learning} },`,
+			`\t{ level: ${entry.level}, seed: ${entry.seed}, profile: '${entry.profile}', density: ${entry.density}, fingerprint: '${entry.fingerprint}', difficultyScore: ${entry.difficultyScore}, solutionDepth: ${entry.solutionDepth}, appendCount: ${entry.appendCount}, maxRows: ${entry.maxRows}${learning} },`,
 		)
 	}
 

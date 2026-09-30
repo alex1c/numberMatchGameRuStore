@@ -1,12 +1,13 @@
 /**
  * Deterministic campaign catalog signature (portable FNV-1a, no Node crypto).
+ * Campaign v2 includes density in the hashed payload.
  */
 
 import type { CampaignEntry } from './types'
 
 /** Compact ordered payload used for signature hashing. */
 export function campaignEntrySignaturePart(entry: CampaignEntry): string {
-	return `${entry.level}|${entry.seed}|${entry.profile}|${entry.fingerprint}`
+	return `${entry.level}|${entry.seed}|${entry.profile}|${entry.density}|${entry.fingerprint}`
 }
 
 /**

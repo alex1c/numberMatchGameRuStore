@@ -2,7 +2,7 @@
  * Campaign catalog entry types (compact, reconstructable).
  */
 
-import type { DifficultyProfile } from '../generator'
+import type { CampaignDensity, DifficultyProfile } from '../generator'
 
 /**
  * Optional early-level teaching tag derived from opening / path analysis.
@@ -16,11 +16,15 @@ export type CampaignLearningRole =
 	| 'linear-only'
 	| 'append'
 
-/** One frozen campaign level — reconstructable via seed + profile + fingerprint. */
+/**
+ * One frozen campaign level — reconstructable via seed + profile + density + fingerprint.
+ * Campaign v2 always includes density (rows at width 8).
+ */
 export interface CampaignEntry {
 	readonly level: number
 	readonly seed: number
 	readonly profile: DifficultyProfile
+	readonly density: CampaignDensity
 	readonly fingerprint: string
 	readonly difficultyScore: number
 	readonly solutionDepth: number

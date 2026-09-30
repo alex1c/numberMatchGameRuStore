@@ -1,15 +1,73 @@
 /**
- * Organic campaign difficulty rhythm — not a rigid E/M/H/X loop.
+ * Organic campaign difficulty + density rhythm — not a rigid E/M/H/X loop.
  *
  * Design goals:
  * - Early levels stay mostly EASY (readable openings)
  * - Difficulty rises in waves with recovery (easier) levels
  * - Later campaign favors HARD / EXPERT more often
  * - No long EXPERT streaks (max 2 consecutive)
+ * - Density (rows at width 8) progresses separately from difficulty
  */
 
-import type { DifficultyProfile } from '../generator'
+import type { CampaignDensity, DifficultyProfile } from '../generator'
 import { CAMPAIGN_LEVEL_COUNT } from './version'
+
+/**
+ * Campaign v2 density rhythm (rows at fixed width 8).
+ * Target bands from product brief — deterministic, not a blind quota.
+ */
+export function densityForLevel(level: number): CampaignDensity {
+	if (!Number.isInteger(level) || level < 1 || level > CAMPAIGN_LEVEL_COUNT) {
+		throw new Error(`densityForLevel: level out of range: ${level}`)
+	}
+
+	// 1–100: primarily 8×7; small amount of 8×8 later in the band.
+	if (level <= 100) {
+		if (level >= 85 && level % 5 === 0) return 8
+		return 7
+	}
+
+	// 101–300: mix 8×7 / 8×8.
+	if (level <= 300) {
+		const phase = level % 5
+		if (phase === 0 || phase === 1) return 7
+		return 8
+	}
+
+	// 301–550: primarily 8×8, with some 8×9.
+	if (level <= 550) {
+		if (level % 7 === 0) return 9
+		return 8
+	}
+
+	// 551–800: mix 8×8 / 8×9.
+	if (level <= 800) {
+		return level % 2 === 0 ? 8 : 9
+	}
+
+	// 801–950: primarily 8×9, occasional 8×10.
+	if (level <= 950) {
+		if (level % 11 === 0) return 10
+		return 9
+	}
+
+	// 951–1000: mix 8×9 / 8×10.
+	return level % 2 === 0 ? 10 : 9
+}
+
+/** Count densities across the full campaign (diagnostics / audit tables). */
+export function countDensitiesInCampaign(): Record<CampaignDensity, number> {
+	const counts: Record<CampaignDensity, number> = {
+		7: 0,
+		8: 0,
+		9: 0,
+		10: 0,
+	}
+	for (let level = 1; level <= CAMPAIGN_LEVEL_COUNT; level += 1) {
+		counts[densityForLevel(level)] += 1
+	}
+	return counts
+}
 
 /**
  * Map a 1-based campaign level onto a difficulty profile.

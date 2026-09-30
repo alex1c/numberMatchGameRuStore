@@ -13,7 +13,11 @@ import {
 	buildCampaignCatalog,
 	formatCatalogSource,
 } from './builder'
-import { countProfilesInCampaign, maxExpertStreak } from './rhythm'
+import {
+	countDensitiesInCampaign,
+	countProfilesInCampaign,
+	maxExpertStreak,
+} from './rhythm'
 import { CAMPAIGN_LEVEL_COUNT, CAMPAIGN_VERSION } from './version'
 import { GENERATION_VERSION } from '../generator'
 
@@ -41,6 +45,7 @@ function main(): void {
 				campaignVersion: CAMPAIGN_VERSION,
 				generationVersion: GENERATION_VERSION,
 				rhythmCounts: countProfilesInCampaign(),
+				densityCounts: countDensitiesInCampaign(),
 				maxExpertStreak: maxExpertStreak(),
 			},
 			null,
