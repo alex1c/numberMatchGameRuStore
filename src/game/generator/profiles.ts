@@ -2,9 +2,9 @@
  * Provisional algorithmic difficulty profiles — single source of truth.
  * These are NOT final human difficulty labels.
  *
- * Calibration evidence (generationVersion=2, difficultyProfileVersion=1):
- * After empty-row collapse, explored-state outliers collapsed dramatically vs gv1.
- * Score clusters by board size / path complexity remain separated across profiles.
+ * Calibration:
+ * - difficultyProfileVersion=1 / generationVersion=2: sparse boards, cell-count gates
+ * - difficultyProfileVersion=2 / generationVersion=3: density-independent ranges
  */
 
 import type { DifficultyMetrics, GeneratorSolverConfig } from './types'
@@ -21,8 +21,9 @@ export interface ProfileRanges {
 	readonly profile: DifficultyProfile
 	readonly minScore: number
 	readonly maxScore: number
-	readonly minCells: number
-	readonly maxCells: number
+	/** Null = do not gate on cell count (gv3 density-independent). */
+	readonly minCells: number | null
+	readonly maxCells: number | null
 	readonly minSolutionDepth: number
 	readonly maxSolutionDepth: number
 	readonly minChoiceStates: number
@@ -34,6 +35,8 @@ export interface ProfileRanges {
 	readonly requireChoice?: boolean
 	readonly allowImmediateAppend: boolean
 	readonly allowTrivialNoChoice: boolean
+	/** Soft upper bound for representation growth (post-solve guard). */
+	readonly maxCellsDuringSolution: number
 }
 
 /**
@@ -61,6 +64,7 @@ export const PROFILE_RANGES: Record<DifficultyProfile, ProfileRanges> = {
 		maxRowsDuringSolution: 12,
 		allowImmediateAppend: false,
 		allowTrivialNoChoice: true,
+		maxCellsDuringSolution: 96,
 	},
 	MEDIUM: {
 		profile: 'MEDIUM',
@@ -79,6 +83,7 @@ export const PROFILE_RANGES: Record<DifficultyProfile, ProfileRanges> = {
 		requireChoice: true,
 		allowImmediateAppend: false,
 		allowTrivialNoChoice: false,
+		maxCellsDuringSolution: 96,
 	},
 	HARD: {
 		profile: 'HARD',
@@ -97,6 +102,7 @@ export const PROFILE_RANGES: Record<DifficultyProfile, ProfileRanges> = {
 		requireChoice: true,
 		allowImmediateAppend: true,
 		allowTrivialNoChoice: false,
+		maxCellsDuringSolution: 96,
 	},
 	EXPERT: {
 		profile: 'EXPERT',
@@ -115,11 +121,105 @@ export const PROFILE_RANGES: Record<DifficultyProfile, ProfileRanges> = {
 		requireChoice: true,
 		allowImmediateAppend: true,
 		allowTrivialNoChoice: false,
+		maxCellsDuringSolution: 96,
 	},
 }
 
 /**
- * Deterministic provisional score from raw metrics.
+ * gv3 profile ranges — gate on score / depth / choices / appends / openings,
+ * NOT on initial cell count (density is an independent axis).
+ *
+ * Dense 8×7..8×10 boards naturally produce deep solutions and many openings,
+ * so bands are wide and overlapping. Campaign rhythm + candidate biases still
+ * label intent; absolute score alone does not sharply separate profiles.
+ * See docs/GENERATOR_V3.md.
+ */
+export const PROFILE_RANGES_GV3: Record<DifficultyProfile, ProfileRanges> = {
+	EASY: {
+		profile: 'EASY',
+		minScore: 0,
+		maxScore: 420,
+		minCells: null,
+		maxCells: null,
+		minSolutionDepth: 20,
+		maxSolutionDepth: 70,
+		minChoiceStates: 0,
+		maxChoiceStates: 60,
+		maxAppendsInSolution: 2,
+		minInitialLegalMoves: 4,
+		maxInitialLegalMoves: 96,
+		maxRowsDuringSolution: 16,
+		allowImmediateAppend: false,
+		allowTrivialNoChoice: true,
+		maxCellsDuringSolution: 160,
+	},
+	MEDIUM: {
+		profile: 'MEDIUM',
+		minScore: 120,
+		maxScore: 460,
+		minCells: null,
+		maxCells: null,
+		minSolutionDepth: 24,
+		maxSolutionDepth: 75,
+		minChoiceStates: 8,
+		maxChoiceStates: 70,
+		maxAppendsInSolution: 3,
+		minInitialLegalMoves: 1,
+		maxInitialLegalMoves: 96,
+		maxRowsDuringSolution: 18,
+		requireChoice: true,
+		allowImmediateAppend: false,
+		allowTrivialNoChoice: false,
+		maxCellsDuringSolution: 168,
+	},
+	HARD: {
+		profile: 'HARD',
+		minScore: 160,
+		maxScore: 500,
+		minCells: null,
+		maxCells: null,
+		minSolutionDepth: 28,
+		maxSolutionDepth: 80,
+		minChoiceStates: 16,
+		maxChoiceStates: 80,
+		maxAppendsInSolution: 3,
+		minInitialLegalMoves: 0,
+		maxInitialLegalMoves: 96,
+		maxRowsDuringSolution: 20,
+		requireChoice: true,
+		allowImmediateAppend: true,
+		allowTrivialNoChoice: false,
+		maxCellsDuringSolution: 176,
+	},
+	EXPERT: {
+		profile: 'EXPERT',
+		minScore: 200,
+		maxScore: 560,
+		minCells: null,
+		maxCells: null,
+		minSolutionDepth: 30,
+		maxSolutionDepth: 90,
+		minChoiceStates: 20,
+		maxChoiceStates: 90,
+		maxAppendsInSolution: 3,
+		minInitialLegalMoves: 0,
+		maxInitialLegalMoves: 96,
+		maxRowsDuringSolution: 24,
+		requireChoice: true,
+		allowImmediateAppend: true,
+		allowTrivialNoChoice: false,
+		maxCellsDuringSolution: 176,
+	},
+}
+
+/**
+ * Alias kept for docs / audits that refer to PROFILE_RANGES_V2 naming.
+ * Same object as PROFILE_RANGES_GV3.
+ */
+export const PROFILE_RANGES_V2 = PROFILE_RANGES_GV3
+
+/**
+ * gv2 score — includes initialCells (sparse boards, cell-count correlated).
  *
  * score =
  *   initialCells * 0.7
@@ -157,18 +257,65 @@ export function computeDifficultyScore(m: {
 	return Math.round(raw * 100) / 100
 }
 
+/**
+ * gv3 density-independent score — drops initialCells so 8×7..8×10
+ * can share the same profile bands.
+ *
+ * Weights emphasize branching / appends / forced play over raw depth,
+ * because dense boards are deep by construction.
+ */
+export function computeDifficultyScoreV2(m: {
+	readonly initialCells: number
+	readonly solutionActionCount: number
+	readonly choiceStates: number
+	readonly peakBranching: number
+	readonly appendActionCount: number
+	readonly diagonalOnlyMoves: number
+	readonly linearOnlyMoves: number
+	readonly forcedRatio: number
+	readonly deadEndRatio: number | null
+}): number {
+	const dead = m.deadEndRatio ?? 0
+	const raw =
+		m.solutionActionCount * 0.7 +
+		m.choiceStates * 3.0 +
+		m.peakBranching * 1.8 +
+		m.appendActionCount * 12 +
+		m.diagonalOnlyMoves * 2.5 +
+		m.linearOnlyMoves * 3 +
+		dead * 18 -
+		m.forcedRatio * 40
+	return Math.round(raw * 100) / 100
+}
+
+/** Pick profile ranges for a difficultyProfileVersion. */
+export function rangesForProfileVersion(
+	profile: DifficultyProfile,
+	difficultyProfileVersion: number,
+): ProfileRanges {
+	if (difficultyProfileVersion >= 2) {
+		return PROFILE_RANGES_GV3[profile]
+	}
+	return PROFILE_RANGES[profile]
+}
+
 export function metricsMatchProfile(
 	metrics: DifficultyMetrics,
 	profile: DifficultyProfile,
+	difficultyProfileVersion: number = 1,
 ): { readonly ok: true } | { readonly ok: false; readonly detail: string } {
-	const r = PROFILE_RANGES[profile]
+	const r = rangesForProfileVersion(profile, difficultyProfileVersion)
 	if (metrics.difficultyScore < r.minScore || metrics.difficultyScore > r.maxScore) {
 		return {
 			ok: false,
 			detail: `score ${metrics.difficultyScore} outside ${r.minScore}-${r.maxScore}`,
 		}
 	}
-	if (metrics.initialCells < r.minCells || metrics.initialCells > r.maxCells) {
+	if (
+		r.minCells !== null &&
+		r.maxCells !== null &&
+		(metrics.initialCells < r.minCells || metrics.initialCells > r.maxCells)
+	) {
 		return {
 			ok: false,
 			detail: `cells ${metrics.initialCells} outside ${r.minCells}-${r.maxCells}`,

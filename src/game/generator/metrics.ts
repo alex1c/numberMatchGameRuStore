@@ -20,7 +20,10 @@ import {
 	type SolverOptions,
 	type SolverStats,
 } from '../solver'
-import { computeDifficultyScore } from './profiles'
+import {
+	computeDifficultyScore,
+	computeDifficultyScoreV2,
+} from './profiles'
 import type { DeadEndMetrics, DifficultyMetrics, GeneratorSolverConfig } from './types'
 
 function rowCount(board: BoardState): number {
@@ -141,7 +144,11 @@ export function analyzeDifficulty(
 	path: readonly SolverAction[],
 	solverStats: SolverStats,
 	solverConfig: GeneratorSolverConfig,
-	options?: { readonly deadEndAnalysis?: boolean },
+	options?: {
+		readonly deadEndAnalysis?: boolean
+		/** 1 = gv2 cell-weighted score; 2 = density-independent score. */
+		readonly difficultyProfileVersion?: number
+	},
 ): DifficultyMetrics {
 	const snapshot = cloneBoard(initial)
 	let state = cloneBoard(initial)
@@ -283,6 +290,12 @@ export function analyzeDifficulty(
 		deadEndRatio: deadEnd.deadEndRatio,
 	}
 
+	const scoreVersion = options?.difficultyProfileVersion ?? 1
+	const difficultyScore =
+		scoreVersion >= 2
+			? computeDifficultyScoreV2(partial)
+			: computeDifficultyScore(partial)
+
 	return {
 		initialCells: partial.initialCells,
 		initialLegalMoves,
@@ -316,7 +329,7 @@ export function analyzeDifficulty(
 		minActiveDuringSolution: minActive,
 		peakActiveDuringSolution: peakActive,
 		removedRatioAtPeak: removedAtPeak,
-		difficultyScore: computeDifficultyScore(partial),
+		difficultyScore,
 		deadEnd,
 		solverElapsedMs: solverStats.elapsedMs,
 	}

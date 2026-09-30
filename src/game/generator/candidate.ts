@@ -4,6 +4,11 @@
  */
 
 import { createBoard, type BoardState, type CellValue } from '../core'
+import {
+	CAMPAIGN_BOARD_WIDTH,
+	densityInitialCells,
+	type CampaignDensity,
+} from './density'
 import { createPrng, shuffleInPlace, type SeededPrng } from './prng'
 import type { DifficultyProfile } from './version'
 import type { CandidateShape } from './types'
@@ -110,6 +115,10 @@ export function placeOpeningPairs(
 	return next
 }
 
+/**
+ * gv2 candidate path — profile-shaped width / cell count.
+ * Do not change: Campaign v1 / reconstruct of generationVersion=2 depend on it.
+ */
 export function createCandidateBoard(
 	profile: DifficultyProfile,
 	attemptSeed: number,
@@ -122,6 +131,66 @@ export function createCandidateBoard(
 	})
 	const openings =
 		profile === 'EASY' ? 3 : profile === 'MEDIUM' ? 2 : profile === 'HARD' ? 1 : 1
+	values = placeOpeningPairs(values, shape.width, prng, openings)
+	const board = createBoard(values, shape.width)
+	return { board, shape }
+}
+
+/** Opening-pair counts for gv3 — denser boards need more readable starts. */
+export function openingPairsForProfileGv3(profile: DifficultyProfile): number {
+	switch (profile) {
+		case 'EASY':
+			return 6
+		case 'MEDIUM':
+			return 4
+		case 'HARD':
+			return 2
+		case 'EXPERT':
+			return 1
+		default: {
+			const _exhaustive: never = profile
+			return _exhaustive
+		}
+	}
+}
+
+/** Equal-pair bias for gv3 — EASY favors obvious same-digit matches. */
+export function equalBiasForProfileGv3(profile: DifficultyProfile): number {
+	switch (profile) {
+		case 'EASY':
+			return 0.68
+		case 'MEDIUM':
+			return 0.5
+		case 'HARD':
+			return 0.4
+		case 'EXPERT':
+			return 0.35
+		default: {
+			const _exhaustive: never = profile
+			return _exhaustive
+		}
+	}
+}
+
+/**
+ * gv3 candidate path — fixed width 8, density-driven initial cell count.
+ * Difficulty profile only influences pairing bias and opening-pair count.
+ */
+export function createCandidateBoardGv3(options: {
+	readonly profile: DifficultyProfile
+	readonly density: CampaignDensity
+	readonly attemptSeed: number
+}): { readonly board: BoardState; readonly shape: CandidateShape } {
+	const { profile, density, attemptSeed } = options
+	const prng = createPrng(attemptSeed)
+	const shape: CandidateShape = {
+		width: CAMPAIGN_BOARD_WIDTH,
+		initialCells: densityInitialCells(density),
+	}
+	let values = buildPairedValues(shape.initialCells, prng, {
+		equalBias: equalBiasForProfileGv3(profile),
+	})
+	const openings = openingPairsForProfileGv3(profile)
 	values = placeOpeningPairs(values, shape.width, prng, openings)
 	const board = createBoard(values, shape.width)
 	return { board, shape }

@@ -2,6 +2,8 @@
  * Audit helpers: aggregate stats, percentile, catalog generation.
  */
 
+import type { CampaignDensity } from './density'
+import { CAMPAIGN_DENSITIES } from './density'
 import { generatePuzzle } from './generate'
 import { findNearDuplicates } from './nearDuplicate'
 import type {
@@ -14,6 +16,8 @@ import { DIFFICULTY_PROFILES } from './version'
 export interface AuditProfileTarget {
 	readonly profile: DifficultyProfile
 	readonly count: number
+	/** When set (gv3), generate at this density. */
+	readonly density?: CampaignDensity
 }
 
 export interface AuditOptions {
@@ -21,10 +25,13 @@ export interface AuditOptions {
 	readonly baseSeed: number
 	readonly maxAttemptsPerPuzzle?: number
 	readonly deadEndAnalysis?: boolean
+	/** Default 3. Pass 2 for historical gv2 audits. */
+	readonly generationVersion?: 2 | 3
 }
 
 export interface ProfileAuditStats {
 	readonly profile: DifficultyProfile
+	readonly density?: CampaignDensity
 	readonly target: number
 	readonly accepted: number
 	readonly attempts: number
@@ -80,6 +87,10 @@ export function median(values: number[]): number {
  */
 export function runAudit(options: AuditOptions): AuditReport {
 	const started = Date.now()
+	// Infer version from targets when omitted so gv2 small audits stay valid.
+	const generationVersion =
+		options.generationVersion ??
+		(options.targets.some((t) => t.density !== undefined) ? 3 : 2)
 	const knownCanonicals = new Set<string>()
 	const knownFingerprints = new Set<string>()
 	const invariantErrors: string[] = []
@@ -103,7 +114,11 @@ export function runAudit(options: AuditOptions): AuditReport {
 			// Safety: avoid unbounded loops if acceptance is pathological.
 			if (seedOffset > target.count * 500) {
 				invariantErrors.push(
-					`${target.profile}: exceeded seed walk budget before quota`,
+					`${target.profile}` +
+						(target.density !== undefined
+							? `@d${target.density}`
+							: '') +
+						': exceeded seed walk budget before quota',
 				)
 				break
 			}
@@ -111,6 +126,8 @@ export function runAudit(options: AuditOptions): AuditReport {
 			const result: GeneratePuzzleResult = generatePuzzle({
 				seed,
 				profile: target.profile,
+				generationVersion,
+				density: target.density,
 				maxCandidateAttempts: options.maxAttemptsPerPuzzle ?? 80,
 				knownCanonicals,
 				knownFingerprints,
@@ -136,11 +153,6 @@ export function runAudit(options: AuditOptions): AuditReport {
 				continue
 			}
 
-			// Invariant: accepted must be solved + replay already checked in generate.
-			if (puzzle.path.length === 0 && puzzle.metrics.initialCells > 0) {
-				// cleared-only edge case ok; otherwise path expected
-			}
-
 			knownCanonicals.add(puzzle.identity.canonical)
 			knownFingerprints.add(puzzle.identity.fingerprint)
 			puzzles.push(puzzle)
@@ -148,6 +160,7 @@ export function runAudit(options: AuditOptions): AuditReport {
 
 		profileStats.push({
 			profile: target.profile,
+			density: target.density,
 			target: target.count,
 			accepted: puzzles.length,
 			attempts,
@@ -208,16 +221,40 @@ export function defaultSmallTargets(): AuditProfileTarget[] {
 	return DIFFICULTY_PROFILES.map((profile) => ({ profile, count: 5 }))
 }
 
+/**
+ * gv3 audit mix: ~250 per density × profile mix totaling ≥1000 accepted.
+ * Per density: EASY 80, MEDIUM 70, HARD 60, EXPERT 40 = 250 × 4 = 1000.
+ */
+export function defaultGv3AuditTargets(): AuditProfileTarget[] {
+	const perDensity: { profile: DifficultyProfile; count: number }[] = [
+		{ profile: 'EASY', count: 80 },
+		{ profile: 'MEDIUM', count: 70 },
+		{ profile: 'HARD', count: 60 },
+		{ profile: 'EXPERT', count: 40 },
+	]
+	const targets: AuditProfileTarget[] = []
+	for (const density of CAMPAIGN_DENSITIES) {
+		for (const row of perDensity) {
+			targets.push({ ...row, density })
+		}
+	}
+	return targets
+}
+
 /** Deterministic fingerprint list for audit comparison (ignores elapsed). */
 export function auditFingerprintSignature(report: AuditReport): string {
 	return report.profiles
 		.map((p) => {
+			const label =
+				p.density !== undefined
+					? `${p.profile}@d${p.density}`
+					: p.profile
 			const fps = p.puzzles.map((x) => x.identity.fingerprint).join(',')
 			const rejects = Object.entries(p.rejectionCounts)
 				.sort(([a], [b]) => a.localeCompare(b))
 				.map(([k, v]) => `${k}:${v}`)
 				.join(',')
-			return `${p.profile}|${p.accepted}|${p.attempts}|${fps}|${rejects}`
+			return `${label}|${p.accepted}|${p.attempts}|${fps}|${rejects}`
 		})
 		.join('||')
 }

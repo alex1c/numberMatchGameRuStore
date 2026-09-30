@@ -1,15 +1,26 @@
 /**
- * Number Match generator public API (PHASE 3).
+ * Number Match generator public API (PHASE 3 / gv3).
  */
 
 export {
 	GENERATION_VERSION,
+	GENERATION_VERSION_V2,
 	DIFFICULTY_PROFILE_VERSION,
+	DIFFICULTY_PROFILE_VERSION_V1,
 	DIFFICULTY_PROFILES,
 	deriveStreamSeed,
 	isDifficultyProfile,
+	isSupportedGenerationVersion,
 } from './version'
 export type { DifficultyProfile } from './version'
+
+export {
+	CAMPAIGN_BOARD_WIDTH,
+	CAMPAIGN_DENSITIES,
+	densityInitialCells,
+	isCampaignDensity,
+} from './density'
+export type { CampaignDensity } from './density'
 
 export {
 	createPrng,
@@ -24,13 +35,22 @@ export {
 	puzzleFingerprint,
 } from './fingerprint'
 
-export { createCandidateBoard, shapeForProfile } from './candidate'
+export {
+	createCandidateBoard,
+	createCandidateBoardGv3,
+	openingPairsForProfileGv3,
+	shapeForProfile,
+} from './candidate'
 
 export {
 	GENERATION_SOLVER_CONFIG,
 	PROFILE_RANGES,
+	PROFILE_RANGES_GV3,
+	PROFILE_RANGES_V2,
 	computeDifficultyScore,
+	computeDifficultyScoreV2,
 	metricsMatchProfile,
+	rangesForProfileVersion,
 } from './profiles'
 
 export { analyzeDifficulty } from './metrics'
@@ -45,6 +65,7 @@ export {
 	defaultFullTargets,
 	default400Targets,
 	defaultSmallTargets,
+	defaultGv3AuditTargets,
 	auditFingerprintSignature,
 	median,
 	percentile,

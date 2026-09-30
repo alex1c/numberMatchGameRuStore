@@ -6,6 +6,8 @@
  *   npm run generator:audit -- --400
  *   npm run generator:audit -- --full
  *   npm run generator:audit -- --full --compare
+ *   npm run generator:audit:gv3
+ *   npm run generator:audit -- --gv3 --density all
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -15,28 +17,47 @@ import {
 	auditFingerprintSignature,
 	default400Targets,
 	defaultFullTargets,
+	defaultGv3AuditTargets,
 	defaultSmallTargets,
 	median,
 	percentile,
 	runAudit,
 	type AuditReport,
 	type AcceptedPuzzle,
-} from './index'
-import { GENERATION_SOLVER_CONFIG } from './profiles'
-import {
+	type AuditProfileTarget,
+	type CampaignDensity,
+	CAMPAIGN_DENSITIES,
 	DIFFICULTY_PROFILE_VERSION,
 	GENERATION_VERSION,
-} from './version'
+	GENERATION_VERSION_V2,
+	GENERATION_SOLVER_CONFIG,
+} from './index'
 
 function parseArgs(argv: string[]) {
+	const gv3 = argv.includes('--gv3')
 	const mode = argv.includes('--full')
 		? 'full'
 		: argv.includes('--400')
 			? '400'
-			: 'small'
+			: gv3
+				? 'gv3'
+				: 'small'
 	const compare = argv.includes('--compare')
 	const write = argv.includes('--write')
-	return { mode, compare, write }
+	const densityIdx = argv.indexOf('--density')
+	let densityFilter: 'all' | CampaignDensity | null = null
+	if (densityIdx >= 0) {
+		const raw = argv[densityIdx + 1]
+		if (raw === 'all') {
+			densityFilter = 'all'
+		} else {
+			const n = Number(raw)
+			if (n === 7 || n === 8 || n === 9 || n === 10) {
+				densityFilter = n
+			}
+		}
+	}
+	return { mode, compare, write, gv3: gv3 || mode === 'gv3', densityFilter }
 }
 
 function rejectCount(
@@ -54,7 +75,7 @@ function printSummary(report: AuditReport, label: string): void {
 		`ok=${report.ok} accepted=${report.acceptedTotal} attempts=${report.attemptsTotal} elapsedMs=${report.elapsedMs}`,
 	)
 	console.log(
-		'Profile\tAccepted\tAttempts\tAcc%\tCutoff\tUnsolv\tDup\tOther',
+		'Profile\tDensity\tAccepted\tAttempts\tAcc%\tCutoff\tUnsolv\tDup\tOther',
 	)
 	for (const p of report.profiles) {
 		const cutoff = p.rejectionCounts.solver_cutoff ?? 0
@@ -71,7 +92,7 @@ function printSummary(report: AuditReport, label: string): void {
 		const acc =
 			p.attempts === 0 ? 0 : Math.round((p.accepted / p.attempts) * 1000) / 10
 		console.log(
-			`${p.profile}\t${p.accepted}\t${p.attempts}\t${acc}\t${cutoff}\t${unsolv}\t${dup}\t${other}`,
+			`${p.profile}\t${p.density ?? '-'}\t${p.accepted}\t${p.attempts}\t${acc}\t${cutoff}\t${unsolv}\t${dup}\t${other}`,
 		)
 	}
 	console.log(
@@ -84,7 +105,12 @@ function printSummary(report: AuditReport, label: string): void {
 
 function metricTable(report: AuditReport): void {
 	console.log('\n=== Difficulty distribution (median / p95 / max) ===')
-	const headers = ['metric', ...report.profiles.map((p) => p.profile)]
+	const headers = [
+		'metric',
+		...report.profiles.map((p) =>
+			p.density !== undefined ? `${p.profile}@${p.density}` : p.profile,
+		),
+	]
 	console.log(headers.join('\t'))
 	const keys: {
 		name: string
@@ -121,26 +147,54 @@ function worstTen(report: AuditReport): AcceptedPuzzle[] {
 		.slice(0, 10)
 }
 
+function resolveTargets(
+	mode: string,
+	gv3: boolean,
+	densityFilter: 'all' | CampaignDensity | null,
+): AuditProfileTarget[] {
+	if (gv3 || mode === 'gv3') {
+		let targets = defaultGv3AuditTargets()
+		if (densityFilter !== null && densityFilter !== 'all') {
+			targets = targets.filter((t) => t.density === densityFilter)
+		}
+		return targets
+	}
+	// Historical gv2 audit targets (no density).
+	if (mode === 'full') return defaultFullTargets()
+	if (mode === '400') return default400Targets()
+	return defaultSmallTargets()
+}
+
 function main(): void {
-	const { mode, compare, write } = parseArgs(process.argv.slice(2))
-	const targets =
-		mode === 'full'
-			? defaultFullTargets()
-			: mode === '400'
-				? default400Targets()
-				: defaultSmallTargets()
-	const baseSeed = mode === 'full' ? 10_000 : mode === '400' ? 5_000 : 42
+	const { mode, compare, write, gv3, densityFilter } = parseArgs(
+		process.argv.slice(2),
+	)
+	const generationVersion = gv3 ? GENERATION_VERSION : GENERATION_VERSION_V2
+	const targets = resolveTargets(mode, gv3, densityFilter)
+	const baseSeed =
+		mode === 'gv3' || gv3
+			? 30_000
+			: mode === 'full'
+				? 10_000
+				: mode === '400'
+					? 5_000
+					: 42
 
 	console.log('Number Match generator audit')
 	console.log(
 		JSON.stringify(
 			{
 				mode,
+				gv3,
+				densityFilter,
 				baseSeed,
-				generationVersion: GENERATION_VERSION,
-				difficultyProfileVersion: DIFFICULTY_PROFILE_VERSION,
+				generationVersion,
+				difficultyProfileVersion: gv3
+					? DIFFICULTY_PROFILE_VERSION
+					: 1,
 				solver: GENERATION_SOLVER_CONFIG,
-				targets,
+				targetCount: targets.reduce((s, t) => s + t.count, 0),
+				densities: gv3 ? [...CAMPAIGN_DENSITIES] : undefined,
 			},
 			null,
 			2,
@@ -152,6 +206,7 @@ function main(): void {
 		baseSeed,
 		maxAttemptsPerPuzzle: 120,
 		deadEndAnalysis: false,
+		generationVersion,
 	})
 	printSummary(report, `${mode} audit`)
 	metricTable(report)
@@ -162,6 +217,9 @@ function main(): void {
 		console.log(
 			[
 				p.identity.profile,
+				p.identity.density !== undefined
+					? `d${p.identity.density}`
+					: '',
 				p.identity.seed,
 				p.identity.fingerprint,
 				`cells=${p.metrics.initialCells}`,
@@ -170,9 +228,12 @@ function main(): void {
 				`choices=${p.metrics.choiceStates}`,
 				`appends=${p.metrics.appendActionCount}`,
 				`rows=${p.metrics.maxRowsDuringSolution}`,
+				`score=${p.metrics.difficultyScore}`,
 				`dead=${p.metrics.deadEnd.deadEndRatio ?? 'null'}`,
 				`ms=${p.metrics.solverElapsedMs}`,
-			].join(' '),
+			]
+				.filter(Boolean)
+				.join(' '),
 		)
 	}
 
@@ -182,6 +243,7 @@ function main(): void {
 			baseSeed,
 			maxAttemptsPerPuzzle: 120,
 			deadEndAnalysis: false,
+			generationVersion,
 		})
 		const a = auditFingerprintSignature(report)
 		const b = auditFingerprintSignature(report2)
@@ -200,11 +262,14 @@ function main(): void {
 		const compact = {
 			metadata: {
 				project: 'numberMatchGameRuStore',
-				generationVersion: GENERATION_VERSION,
-				difficultyProfileVersion: DIFFICULTY_PROFILE_VERSION,
+				generationVersion,
+				difficultyProfileVersion: gv3
+					? DIFFICULTY_PROFILE_VERSION
+					: 1,
 				solver: GENERATION_SOLVER_CONFIG,
 				baseSeed,
 				mode,
+				gv3,
 				generatedAt: new Date().toISOString(),
 			},
 			ok: report.ok,
@@ -213,6 +278,7 @@ function main(): void {
 			elapsedMs: report.elapsedMs,
 			profiles: report.profiles.map((p) => ({
 				profile: p.profile,
+				density: p.density,
 				target: p.target,
 				accepted: p.accepted,
 				attempts: p.attempts,
@@ -222,18 +288,21 @@ function main(): void {
 			})),
 			worst: worst.map((p) => ({
 				profile: p.identity.profile,
+				density: p.identity.density,
 				seed: p.identity.seed,
 				fingerprint: p.identity.fingerprint,
 				metrics: p.metrics,
 			})),
 			nearDuplicates: report.nearDuplicates,
 		}
-		const path = resolve(dir, `${mode}-summary.json`)
+		const path = resolve(
+			dir,
+			`${gv3 ? 'gv3' : mode}-summary.json`,
+		)
 		writeFileSync(path, JSON.stringify(compact, null, 2), 'utf8')
 		console.log('wrote', path)
 	}
 
-	// Silence unused in small builds
 	void rejectCount
 
 	if (!report.ok) {

@@ -7,8 +7,11 @@ import { toCanonicalBoard, type BoardState } from '../core'
 import { GENERATION_VERSION } from './version'
 
 /** Full canonical puzzle body used for exact duplicate detection. */
-export function puzzleCanonical(board: BoardState): string {
-	return `gv${GENERATION_VERSION}|${toCanonicalBoard(board)}`
+export function puzzleCanonical(
+	board: BoardState,
+	generationVersion: number = GENERATION_VERSION,
+): string {
+	return `gv${generationVersion}|${toCanonicalBoard(board)}`
 }
 
 /**
@@ -24,10 +27,13 @@ export function fingerprintFromCanonical(canonical: string): string {
 	return `f${hash.toString(16).padStart(8, '0')}`
 }
 
-export function puzzleFingerprint(board: BoardState): {
+export function puzzleFingerprint(
+	board: BoardState,
+	generationVersion: number = GENERATION_VERSION,
+): {
 	readonly canonical: string
 	readonly fingerprint: string
 } {
-	const canonical = puzzleCanonical(board)
+	const canonical = puzzleCanonical(board, generationVersion)
 	return { canonical, fingerprint: fingerprintFromCanonical(canonical) }
 }

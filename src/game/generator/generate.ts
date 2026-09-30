@@ -6,7 +6,11 @@
 
 import { cloneBoard, validateBoard } from '../core'
 import { replaySolution, solveBoard } from '../solver'
-import { createCandidateBoard } from './candidate'
+import {
+	createCandidateBoard,
+	createCandidateBoardGv3,
+} from './candidate'
+import { isCampaignDensity, type CampaignDensity } from './density'
 import { puzzleFingerprint } from './fingerprint'
 import { runPostSolveGuards, runStructuralGuards } from './guards'
 import { analyzeDifficulty } from './metrics'
@@ -22,9 +26,12 @@ import type {
 } from './types'
 import {
 	DIFFICULTY_PROFILE_VERSION,
+	DIFFICULTY_PROFILE_VERSION_V1,
 	GENERATION_VERSION,
+	GENERATION_VERSION_V2,
 	deriveStreamSeed,
 	isDifficultyProfile,
+	isSupportedGenerationVersion,
 } from './version'
 
 function bump(
@@ -45,6 +52,20 @@ function resolveSolverConfig(
 	}
 }
 
+function resolveGenerationVersion(
+	options: GeneratePuzzleOptions,
+): typeof GENERATION_VERSION | typeof GENERATION_VERSION_V2 {
+	return options.generationVersion ?? GENERATION_VERSION
+}
+
+function resolveDifficultyProfileVersion(
+	generationVersion: number,
+): number {
+	return generationVersion >= 3
+		? DIFFICULTY_PROFILE_VERSION
+		: DIFFICULTY_PROFILE_VERSION_V1
+}
+
 export function validateGenerateOptions(
 	options: GeneratePuzzleOptions,
 ): string | null {
@@ -61,12 +82,27 @@ export function validateGenerateOptions(
 	) {
 		return 'maxCandidateAttempts must be a positive integer'
 	}
+	const generationVersion = resolveGenerationVersion(options)
+	if (!isSupportedGenerationVersion(generationVersion)) {
+		return `unsupported generationVersion: ${generationVersion}`
+	}
+	if (generationVersion >= 3) {
+		if (options.density === undefined) {
+			return 'density is required for generationVersion 3'
+		}
+		if (!isCampaignDensity(options.density)) {
+			return `unsupported density: ${String(options.density)}`
+		}
+	}
 	return null
 }
 
 /**
  * Generate one accepted puzzle for a profile, or a typed failure.
  * Fully deterministic for the same options + known-duplicate sets.
+ *
+ * Default generationVersion is 3 (requires density). Pass generationVersion: 2
+ * for the historical gv2 sparse-board path (density ignored).
  */
 export function generatePuzzle(
 	options: GeneratePuzzleOptions,
@@ -76,12 +112,19 @@ export function generatePuzzle(
 		return { status: 'invalid_config', reason: configError }
 	}
 
+	const generationVersion = resolveGenerationVersion(options)
+	const difficultyProfileVersion =
+		resolveDifficultyProfileVersion(generationVersion)
+	const density: CampaignDensity | undefined =
+		generationVersion >= 3 ? options.density : undefined
+
 	const maxAttempts = options.maxCandidateAttempts ?? 80
 	const solverConfig = resolveSolverConfig(options.solver)
 	const stream = deriveStreamSeed(
-		GENERATION_VERSION,
+		generationVersion,
 		options.profile,
 		options.seed,
+		density,
 	)
 
 	const rejectionCounts: Record<string, number> = {}
@@ -91,8 +134,20 @@ export function generatePuzzle(
 
 	for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
 		const attemptSeed = (stream + attempt * 0x9e3779b9) >>> 0
-		const { board } = createCandidateBoard(options.profile, attemptSeed)
-		const structural = runStructuralGuards(board, options.profile)
+		const { board } =
+			generationVersion >= 3 && density !== undefined
+				? createCandidateBoardGv3({
+						profile: options.profile,
+						density,
+						attemptSeed,
+					})
+				: createCandidateBoard(options.profile, attemptSeed)
+
+		const structural = runStructuralGuards(
+			board,
+			options.profile,
+			difficultyProfileVersion,
+		)
 		if (!structural.ok) {
 			bump(rejectionCounts, structural.reason ?? 'invalid_candidate')
 			continue
@@ -104,7 +159,10 @@ export function generatePuzzle(
 			continue
 		}
 
-		const { canonical, fingerprint } = puzzleFingerprint(board)
+		const { canonical, fingerprint } = puzzleFingerprint(
+			board,
+			generationVersion,
+		)
 		if (
 			knownFingerprints.has(fingerprint) ||
 			knownCanonicals.has(canonical)
@@ -153,16 +211,27 @@ export function generatePuzzle(
 			solved.path,
 			solved.stats,
 			solverConfig,
-			{ deadEndAnalysis: options.deadEndAnalysis === true },
+			{
+				deadEndAnalysis: options.deadEndAnalysis === true,
+				difficultyProfileVersion,
+			},
 		)
 
-		const post = runPostSolveGuards(metrics, options.profile)
+		const post = runPostSolveGuards(
+			metrics,
+			options.profile,
+			difficultyProfileVersion,
+		)
 		if (!post.ok) {
 			bump(rejectionCounts, post.reason ?? 'profile_mismatch')
 			continue
 		}
 
-		const profileOk = metricsMatchProfile(metrics, options.profile)
+		const profileOk = metricsMatchProfile(
+			metrics,
+			options.profile,
+			difficultyProfileVersion,
+		)
 		if (!profileOk.ok) {
 			bump(rejectionCounts, 'profile_mismatch')
 			continue
@@ -183,12 +252,13 @@ export function generatePuzzle(
 			rejectionCounts,
 			puzzle: {
 				identity: {
-					generationVersion: GENERATION_VERSION,
-					difficultyProfileVersion: DIFFICULTY_PROFILE_VERSION,
+					generationVersion,
+					difficultyProfileVersion,
 					seed: options.seed,
 					profile: options.profile,
 					fingerprint,
 					canonical,
+					...(density !== undefined ? { density } : {}),
 				},
 				board: immutableBoard,
 				values,

@@ -4,7 +4,7 @@
  */
 
 import { countActiveCells, getAvailableMoves, type BoardState } from '../core'
-import { PROFILE_RANGES } from './profiles'
+import { rangesForProfileVersion } from './profiles'
 import type { DifficultyMetrics, RejectionReason } from './types'
 import type { DifficultyProfile } from './version'
 
@@ -59,8 +59,9 @@ function digitFrequencySkewed(board: BoardState): boolean {
 export function guardOpeningQuality(
 	board: BoardState,
 	profile: DifficultyProfile,
+	difficultyProfileVersion: number = 1,
 ): GuardResult {
-	const ranges = PROFILE_RANGES[profile]
+	const ranges = rangesForProfileVersion(profile, difficultyProfileVersion)
 	const moves = getAvailableMoves(board).length
 	if (moves === 0 && !ranges.allowImmediateAppend) {
 		return {
@@ -76,6 +77,15 @@ export function guardOpeningQuality(
 			reason: 'opening_quality',
 			guard: 'opening_too_noisy',
 			detail: `initialLegalMoves=${moves}`,
+		}
+	}
+	// gv3 EASY expects enough openings (density-independent readability).
+	if (moves < ranges.minInitialLegalMoves) {
+		return {
+			ok: false,
+			reason: 'opening_quality',
+			guard: 'opening_too_sparse',
+			detail: `initialLegalMoves=${moves} < ${ranges.minInitialLegalMoves}`,
 		}
 	}
 	return { ok: true }
@@ -112,8 +122,9 @@ export function guardDistribution(board: BoardState): GuardResult {
 export function guardTriviality(
 	metrics: DifficultyMetrics,
 	profile: DifficultyProfile,
+	difficultyProfileVersion: number = 1,
 ): GuardResult {
-	const ranges = PROFILE_RANGES[profile]
+	const ranges = rangesForProfileVersion(profile, difficultyProfileVersion)
 	if (
 		!ranges.allowTrivialNoChoice &&
 		metrics.choiceStates === 0 &&
@@ -136,17 +147,18 @@ export function guardTriviality(
 export function guardMobileGrowth(
 	metrics: DifficultyMetrics,
 	profile: DifficultyProfile,
+	difficultyProfileVersion: number = 1,
 ): GuardResult {
-	const maxRows = PROFILE_RANGES[profile].maxRowsDuringSolution
-	if (metrics.maxRowsDuringSolution > maxRows) {
+	const ranges = rangesForProfileVersion(profile, difficultyProfileVersion)
+	if (metrics.maxRowsDuringSolution > ranges.maxRowsDuringSolution) {
 		return {
 			ok: false,
 			reason: 'excessive_growth',
 			guard: 'max_rows_during_solution',
-			detail: `maxRows=${metrics.maxRowsDuringSolution} > ${maxRows}`,
+			detail: `maxRows=${metrics.maxRowsDuringSolution} > ${ranges.maxRowsDuringSolution}`,
 		}
 	}
-	if (metrics.maxCellsDuringSolution > 96) {
+	if (metrics.maxCellsDuringSolution > ranges.maxCellsDuringSolution) {
 		return {
 			ok: false,
 			reason: 'excessive_growth',
@@ -160,6 +172,7 @@ export function guardMobileGrowth(
 export function runStructuralGuards(
 	board: BoardState,
 	profile: DifficultyProfile,
+	difficultyProfileVersion: number = 1,
 ): GuardResult {
 	if (countActiveCells(board) === 0) {
 		return {
@@ -168,7 +181,7 @@ export function runStructuralGuards(
 			guard: 'empty_board',
 		}
 	}
-	const opening = guardOpeningQuality(board, profile)
+	const opening = guardOpeningQuality(board, profile, difficultyProfileVersion)
 	if (!opening.ok) return opening
 	const dist = guardDistribution(board)
 	if (!dist.ok) return dist
@@ -178,8 +191,9 @@ export function runStructuralGuards(
 export function runPostSolveGuards(
 	metrics: DifficultyMetrics,
 	profile: DifficultyProfile,
+	difficultyProfileVersion: number = 1,
 ): GuardResult {
-	const trivial = guardTriviality(metrics, profile)
+	const trivial = guardTriviality(metrics, profile, difficultyProfileVersion)
 	if (!trivial.ok) return trivial
-	return guardMobileGrowth(metrics, profile)
+	return guardMobileGrowth(metrics, profile, difficultyProfileVersion)
 }

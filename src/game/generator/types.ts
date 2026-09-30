@@ -4,6 +4,7 @@
 
 import type { BoardState, CellValue } from '../core'
 import type { SolverAction, SolverStats } from '../solver'
+import type { CampaignDensity } from './density'
 import type { DifficultyProfile } from './version'
 
 export type {
@@ -101,6 +102,8 @@ export interface PuzzleIdentity {
 	readonly profile: DifficultyProfile
 	readonly fingerprint: string
 	readonly canonical: string
+	/** Present on gv3 puzzles — rows at width 8. */
+	readonly density?: CampaignDensity
 }
 
 export interface AcceptedPuzzle {
@@ -137,6 +140,13 @@ export type GeneratePuzzleResult =
 export interface GeneratePuzzleOptions {
 	readonly seed: number
 	readonly profile: DifficultyProfile
+	/**
+	 * Default 3 (production). Pass 2 for historical gv2 sparse boards.
+	 * Density is required when generationVersion is 3.
+	 */
+	readonly generationVersion?: 2 | 3
+	/** Rows at width 8 — required for gv3, ignored for gv2. */
+	readonly density?: CampaignDensity
 	readonly maxCandidateAttempts?: number
 	readonly knownFingerprints?: ReadonlySet<string>
 	readonly knownCanonicals?: ReadonlySet<string>
