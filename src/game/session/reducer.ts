@@ -61,6 +61,8 @@ export function createGameSession(
 		hintBusy: false,
 		usedHint: false,
 		usedUndo: false,
+		freeHintConsumed: false,
+		freeUndoConsumed: false,
 	}
 }
 
@@ -77,6 +79,8 @@ export function hydrateGameSession(input: {
 	readonly completed?: boolean
 	readonly usedHint?: boolean
 	readonly usedUndo?: boolean
+	readonly freeHintConsumed?: boolean
+	readonly freeUndoConsumed?: boolean
 	readonly undoAfterCompletion?: boolean
 }): GameSessionState {
 	const board = cloneBoard(input.board)
@@ -97,6 +101,8 @@ export function hydrateGameSession(input: {
 		hintBusy: false,
 		usedHint: input.usedHint === true,
 		usedUndo: input.usedUndo === true,
+		freeHintConsumed: input.freeHintConsumed === true,
+		freeUndoConsumed: input.freeUndoConsumed === true,
 		undoAfterCompletion: input.undoAfterCompletion,
 	}
 }
@@ -123,7 +129,8 @@ export function reduceGameSession(
 			return { ...state, hintBusy: action.busy }
 
 		case 'APPLY_HINT': {
-			// Only a delivered hint (match/append) counts against the clean-run star.
+			// Delivered match/append: mastery + free entitlement both advance.
+			// Failed/unavailable Hint leaves both flags unchanged.
 			const delivered =
 				action.kind === 'match' || action.kind === 'append'
 			if (action.kind === 'match' && action.indices) {
@@ -134,6 +141,9 @@ export function reduceGameSession(
 					statusMessage: action.message,
 					selectedIndex: null,
 					usedHint: delivered ? true : state.usedHint,
+					freeHintConsumed: delivered
+						? true
+						: state.freeHintConsumed,
 				}
 			}
 			return {
@@ -142,6 +152,7 @@ export function reduceGameSession(
 				hintIndices: [],
 				statusMessage: action.message,
 				usedHint: delivered ? true : state.usedHint,
+				freeHintConsumed: delivered ? true : state.freeHintConsumed,
 			}
 		}
 
@@ -269,6 +280,7 @@ export function reduceGameSession(
 				statusMessage: null,
 				hintBusy: false,
 				usedUndo: true,
+				freeUndoConsumed: true,
 			}
 		}
 
@@ -289,6 +301,8 @@ export function reduceGameSession(
 				interactionLocked: false,
 				usedHint: false,
 				usedUndo: false,
+				freeHintConsumed: false,
+				freeUndoConsumed: false,
 			}
 		}
 

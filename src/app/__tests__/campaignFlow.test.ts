@@ -141,6 +141,8 @@ describe('campaign start → complete → next', () => {
 				counters: state.counters,
 				usedHint: true,
 				usedUndo: false,
+				freeHintConsumed: true,
+				freeUndoConsumed: false,
 			}),
 		)
 
@@ -148,9 +150,11 @@ describe('campaign start → complete → next', () => {
 		const root = await repo2.hydrate()
 		expect(root.activeSession).not.toBeNull()
 		expect(root.activeSession!.usedHint).toBe(true)
+		expect(root.activeSession!.freeHintConsumed).toBe(true)
 		const restored = gameSessionFromPersisted(root.activeSession!)
 		expect(restored).not.toBeNull()
 		expect(restored!.usedHint).toBe(true)
+		expect(restored!.freeHintConsumed).toBe(true)
 		expect(toCanonicalBoard(restored!.board)).toBe(
 			toCanonicalBoard(state.board),
 		)
@@ -331,10 +335,12 @@ describe('completion idempotency + next double-tap', () => {
 			counters: { matchesRemoved: 0, appendActions: 1, undoActions: 0 },
 			completed: false,
 			usedHint: true,
+			freeHintConsumed: true,
 		})
 		expect(state.history).toHaveLength(1)
 		expect(state.counters.appendActions).toBe(1)
 		expect(state.usedHint).toBe(true)
+		expect(state.freeHintConsumed).toBe(true)
 		expect(state.undoAfterCompletion).toBeUndefined()
 	}, 60_000)
 })

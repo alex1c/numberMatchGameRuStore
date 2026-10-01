@@ -48,10 +48,20 @@ export interface GameSessionState {
 	 * DEV fixtures omit this (Undo remains available via overlay).
 	 */
 	readonly undoAfterCompletion?: boolean
-	/** Attempt flag: a delivered Hint was consumed (star penalty). */
+	/** Mastery/star flag: a delivered Hint was used this attempt. */
 	readonly usedHint: boolean
-	/** Attempt flag: Undo was performed (star penalty). */
+	/** Mastery/star flag: Undo was performed this attempt. */
 	readonly usedUndo: boolean
+	/**
+	 * Monetization: the one free Hint entitlement for this attempt was consumed
+	 * (only after useful assistance was delivered). Independent of stars.
+	 */
+	readonly freeHintConsumed: boolean
+	/**
+	 * Monetization: the one free Undo entitlement for this attempt was consumed
+	 * (only after an actual Undo). Independent of stars.
+	 */
+	readonly freeUndoConsumed: boolean
 }
 
 export type GameSessionAction =

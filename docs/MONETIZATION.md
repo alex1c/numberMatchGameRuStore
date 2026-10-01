@@ -14,26 +14,28 @@ All 1000 Campaign levels remain free. Training is ad-free.
 
 Training and Density Lab: **no ads**.
 
-## Rewarded help lifecycle (physical QA fix)
+## Help entitlement (four fields)
 
-Do **not** recover UI solely from `await ad.show()` — on some Android devices
-the promise never settles after close (ForestMusic `REWARDED_GAME_RELEASE`).
+Per attempt:
 
-Settlement is driven by:
+| Field | Role |
+|-------|------|
+| `usedHint` / `usedUndo` | mastery / stars / analytics only |
+| `freeHintConsumed` / `freeUndoConsumed` | monetization free allowance only |
 
-- verified `onRewarded` (only grant path, once);
-- dismiss / fail-to-show;
-- short grace for close→reward ordering;
-- fail-safe timeout (never invents a reward).
+Do **not** derive free entitlement from `usedHint`/`usedUndo`.
 
-UI phases:
+- First successful Hint/Undo → free consumed + star flag
+- Failed Hint → neither
+- Restart / Next / Replay → all four reset to false
+- Home / Continue / process death → preserve both pairs
+- Schema stays **v2**; missing `free*` on old saves defaults from `used*`
 
-- ad loading/showing → status `Загрузка рекламы…` (Hint button disabled, **not** `Ищу…`);
-- after reward → Hint computation → `Ищу…`;
-- every terminal path clears ad busy.
+## Rewarded help lifecycle
 
-Free entitlement uses existing schema v2 `usedHint` / `usedUndo` (set only on
-delivered help). Transient ad transaction state is never persisted.
+Do **not** recover UI solely from `await ad.show()`. Settlement uses reward /
+dismiss / fail + grace + fail-safe. Ad busy (`Загрузка рекламы…`) is separate
+from Hint computing (`Ищу…`).
 
 ## Interstitial gate (process session)
 

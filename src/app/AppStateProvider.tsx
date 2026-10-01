@@ -213,6 +213,8 @@ export function AppStateProvider({
 				},
 				usedHint: false,
 				usedUndo: false,
+				freeHintConsumed: false,
+				freeUndoConsumed: false,
 			})
 
 			const next = await repository.setActiveSession(session)
@@ -265,6 +267,8 @@ export function AppStateProvider({
 					density: active.density,
 					usedHint: session.usedHint,
 					usedUndo: session.usedUndo,
+					freeHintConsumed: session.freeHintConsumed,
+					freeUndoConsumed: session.freeUndoConsumed,
 					initialBoard: session.initialBoard,
 					generationVersion: active.generationVersion,
 				})
@@ -307,6 +311,8 @@ export function AppStateProvider({
 					density: active.density,
 					usedHint: session.usedHint,
 					usedUndo: session.usedUndo,
+					freeHintConsumed: session.freeHintConsumed,
+					freeUndoConsumed: session.freeUndoConsumed,
 					initialBoard: session.initialBoard,
 					generationVersion: active.generationVersion,
 				})
@@ -340,6 +346,8 @@ export function AppStateProvider({
 				counters: session.counters,
 				usedHint: session.usedHint,
 				usedUndo: session.usedUndo,
+				freeHintConsumed: session.freeHintConsumed,
+				freeUndoConsumed: session.freeUndoConsumed,
 				status: 'in_progress',
 			})
 			setRoot(next)

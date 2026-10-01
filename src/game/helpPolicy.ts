@@ -1,18 +1,12 @@
 /**
  * Hint/Undo entitlement policy — separated from session/solver core.
  *
- * Free entitlement vs star flags:
- * Schema v2 already persists `usedHint` / `usedUndo` on the attempt.
- * After a *delivered* help action these flags mean both:
- *   A) stars: assistance was used this attempt
- *   B) entitlement: the one free Hint/Undo was consumed
- * They are set only when assistance is actually delivered (not on busy /
- * solver failure / rewarded failure). No schema bump is required.
+ * Four attempt fields (do not couple):
+ * - usedHint / usedUndo — mastery/star facts only
+ * - freeHintConsumed / freeUndoConsumed — monetization free allowance only
  *
- * Cold restore preserves these attempt facts. Transient ad transaction state
- * is never persisted.
- *
- * Restart / new replay clears both flags (new attempt with free help again).
+ * Free entitlement is consumed only when useful help is actually delivered.
+ * Stars use usedHint/usedUndo exclusively.
  */
 
 export type HelpKind = 'hint' | 'undo'
@@ -29,19 +23,18 @@ export interface HelpEntitlementDecision {
 	readonly reason?: string
 }
 
+/** Monetization entitlement inputs — never derive from usedHint/usedUndo. */
 export interface HelpAttemptUsage {
-	readonly usedHint: boolean
-	readonly usedUndo: boolean
+	readonly freeHintConsumed: boolean
+	readonly freeUndoConsumed: boolean
 }
 
-/** Explicit alias: free Hint already consumed this attempt (= delivered usedHint). */
 export function isFreeHintConsumed(usage: HelpAttemptUsage): boolean {
-	return usage.usedHint
+	return usage.freeHintConsumed
 }
 
-/** Explicit alias: free Undo already consumed this attempt (= delivered usedUndo). */
 export function isFreeUndoConsumed(usage: HelpAttemptUsage): boolean {
-	return usage.usedUndo
+	return usage.freeUndoConsumed
 }
 
 /**

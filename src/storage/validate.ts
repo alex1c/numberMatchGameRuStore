@@ -157,6 +157,14 @@ export function validateActiveSession(
 	if (!isBoolean(raw.usedUndo)) {
 		return { ok: false, reason: 'activeSession.usedUndo invalid' }
 	}
+	// Schema v2 in-place extension: missing free* defaults from used* so
+	// pre-split development saves stay consistent; new writes always store both.
+	const freeHintConsumed = isBoolean(raw.freeHintConsumed)
+		? raw.freeHintConsumed
+		: raw.usedHint === true
+	const freeUndoConsumed = isBoolean(raw.freeUndoConsumed)
+		? raw.freeUndoConsumed
+		: raw.usedUndo === true
 
 	const board = validatePersistedBoard(raw.board)
 	if (!board.ok) {
@@ -227,6 +235,8 @@ export function validateActiveSession(
 		nextCellSeq: raw.nextCellSeq,
 		usedHint: raw.usedHint,
 		usedUndo: raw.usedUndo,
+		freeHintConsumed,
+		freeUndoConsumed,
 	}
 	if (initialBoard) {
 		return { ok: true, value: { ...session, initialBoard } }

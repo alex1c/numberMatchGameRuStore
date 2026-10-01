@@ -316,6 +316,8 @@ export class PersistRepository {
 		readonly density: PersistedActiveSession['density']
 		readonly usedHint: boolean
 		readonly usedUndo: boolean
+		readonly freeHintConsumed?: boolean
+		readonly freeUndoConsumed?: boolean
 		readonly initialBoard?: Parameters<typeof serializeBoard>[0]
 		readonly generationVersion?: number
 	}): Promise<PersistedRootV2> {
@@ -350,6 +352,8 @@ export class PersistRepository {
 				nextCellSeq: board.nextCellSeq,
 				usedHint: input.usedHint,
 				usedUndo: input.usedUndo,
+				freeHintConsumed: input.freeHintConsumed === true,
+				freeUndoConsumed: input.freeUndoConsumed === true,
 				...(input.initialBoard
 					? { initialBoard: serializeBoard(input.initialBoard) }
 					: current.activeSession?.initialBoard
@@ -379,6 +383,8 @@ export class PersistRepository {
 		readonly density: PersistedActiveSession['density']
 		readonly usedHint: boolean
 		readonly usedUndo: boolean
+		readonly freeHintConsumed?: boolean
+		readonly freeUndoConsumed?: boolean
 		readonly initialBoard?: Parameters<typeof serializeBoard>[0]
 		readonly generationVersion?: number
 	}): Promise<PersistedRootV2> {
@@ -412,6 +418,8 @@ export class PersistRepository {
 				nextCellSeq: board.nextCellSeq,
 				usedHint: input.usedHint,
 				usedUndo: input.usedUndo,
+				freeHintConsumed: input.freeHintConsumed === true,
+				freeUndoConsumed: input.freeUndoConsumed === true,
 				...(input.initialBoard
 					? { initialBoard: serializeBoard(input.initialBoard) }
 					: current.activeSession?.initialBoard
@@ -436,6 +444,8 @@ export class PersistRepository {
 		readonly counters: PersistedActiveSession['counters']
 		readonly usedHint: boolean
 		readonly usedUndo: boolean
+		readonly freeHintConsumed: boolean
+		readonly freeUndoConsumed: boolean
 		readonly status?: PersistedActiveSession['status']
 	}): Promise<PersistedRootV2> {
 		const { root } = await this.update((current) => {
@@ -454,6 +464,8 @@ export class PersistRepository {
 					nextCellSeq: board.nextCellSeq,
 					usedHint: input.usedHint,
 					usedUndo: input.usedUndo,
+					freeHintConsumed: input.freeHintConsumed,
+					freeUndoConsumed: input.freeUndoConsumed,
 				},
 			}
 		})
@@ -486,6 +498,8 @@ export function buildActiveSession(input: {
 	readonly generationVersion?: number
 	readonly usedHint?: boolean
 	readonly usedUndo?: boolean
+	readonly freeHintConsumed?: boolean
+	readonly freeUndoConsumed?: boolean
 }): PersistedActiveSession {
 	const board = serializeBoard(input.board)
 	const history = (input.history ?? []).map(serializeBoard)
@@ -505,6 +519,8 @@ export function buildActiveSession(input: {
 		nextCellSeq: board.nextCellSeq,
 		usedHint: input.usedHint === true,
 		usedUndo: input.usedUndo === true,
+		freeHintConsumed: input.freeHintConsumed === true,
+		freeUndoConsumed: input.freeUndoConsumed === true,
 	}
 	if (input.initialBoard) {
 		return {

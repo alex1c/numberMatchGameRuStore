@@ -2,6 +2,7 @@
  * Persistence schema types — versioned root blob under a stable storage key.
  *
  * schemaVersion 2 = Campaign v2 + mastery stars + attempt help flags.
+ * freeHintConsumed / freeUndoConsumed added in-place (defaults on read).
  * Storage key stays `numbermatch.persist.v1` (schema lives inside the blob).
  */
 
@@ -62,9 +63,16 @@ export interface PersistedActiveSession {
 	readonly counters: PersistedCountersV1
 	/** Echo of board.nextCellSeq for quick validation. */
 	readonly nextCellSeq: number
-	/** Attempt help flags — cold restore must preserve for star scoring. */
+	/** Mastery/star attempt flags — cold restore must preserve. */
 	readonly usedHint: boolean
 	readonly usedUndo: boolean
+	/**
+	 * Monetization free-help entitlement for this attempt.
+	 * Independent of usedHint/usedUndo (stars). Schema v2 extended in place:
+	 * missing fields default from usedHint/usedUndo for pre-split saves.
+	 */
+	readonly freeHintConsumed: boolean
+	readonly freeUndoConsumed: boolean
 }
 
 /**

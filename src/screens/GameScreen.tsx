@@ -202,23 +202,44 @@ export function GameScreen({
 			session.counters.appendActions,
 			session.counters.undoActions,
 			session.completed ? '1' : '0',
+			// Help flags must sync even when the board looks pristine (Restart).
+			session.usedHint ? '1' : '0',
+			session.usedUndo ? '1' : '0',
+			session.freeHintConsumed ? '1' : '0',
+			session.freeUndoConsumed ? '1' : '0',
 		].join(':')
 		if (key === lastSyncedKey.current) {
 			return
 		}
-		// Skip pristine fresh start (nothing to persist beyond initial write).
-		if (
+		const boardPristine =
 			session.history.length === 0 &&
 			session.counters.matchesRemoved === 0 &&
 			session.counters.appendActions === 0 &&
 			!session.completed
-		) {
-			lastSyncedKey.current = key
-			return
+		const helpPristine =
+			!session.usedHint &&
+			!session.usedUndo &&
+			!session.freeHintConsumed &&
+			!session.freeUndoConsumed
+		// Skip only when board AND help are pristine AND disk already matches.
+		// After Restart, help flags clear while disk may still hold consumed
+		// entitlement — that must sync (key differs via help bits, or dirty disk).
+		if (boardPristine && helpPristine) {
+			const persisted = activeSession
+			const diskDirty =
+				persisted != null &&
+				(persisted.usedHint ||
+					persisted.usedUndo ||
+					persisted.freeHintConsumed ||
+					persisted.freeUndoConsumed)
+			if (!diskDirty) {
+				lastSyncedKey.current = key
+				return
+			}
 		}
 		lastSyncedKey.current = key
 		void syncSessionFromGameplay(session)
-	}, [isCampaign, session, syncSessionFromGameplay])
+	}, [activeSession, isCampaign, session, syncSessionFromGameplay])
 
 	// Commit campaign completion once (idempotent) + analytics + interstitial count.
 	useEffect(() => {
@@ -290,6 +311,8 @@ export function GameScreen({
 			levelStartedKey.current = null
 			levelCompletedAnalyticsKey.current = null
 			completionCommitted.current = null
+			// Force help-flag sync after Restart (free entitlement must clear on disk).
+			lastSyncedKey.current = null
 		}
 		if (!isDirty && session.history.length === 0) {
 			doRestart()
@@ -350,7 +373,10 @@ export function GameScreen({
 		}
 		const decision = decideHelpEntitlement(
 			'hint',
-			{ usedHint: session.usedHint, usedUndo: session.usedUndo },
+			{
+				freeHintConsumed: session.freeHintConsumed,
+				freeUndoConsumed: session.freeUndoConsumed,
+			},
 			{ monetized, completed: session.completed },
 		)
 		if (!decision.allowed) {
@@ -427,7 +453,10 @@ export function GameScreen({
 		}
 		const decision = decideHelpEntitlement(
 			'undo',
-			{ usedHint: session.usedHint, usedUndo: session.usedUndo },
+			{
+				freeHintConsumed: session.freeHintConsumed,
+				freeUndoConsumed: session.freeUndoConsumed,
+			},
 			{
 				monetized,
 				completed: session.completed,
@@ -742,6 +771,13 @@ export function GameScreen({
 						{session.identity.profile} · seed {session.identity.seed}
 						{` · fp ${session.identity.fingerprint}`}
 						{` · ${session.counters.matchesRemoved}п/${session.counters.appendActions}+`}
+					</Text>
+					<Text
+						style={[styles.metaText, { color: theme.colors.textMuted }]}
+						testID="game-dev-help-entitlement"
+					>
+						{`Hint free: ${session.freeHintConsumed ? 'used' : 'available'} · Undo free: ${session.freeUndoConsumed ? 'used' : 'available'}`}
+						{` · stars H/U: ${session.usedHint ? '1' : '0'}/${session.usedUndo ? '1' : '0'}`}
 					</Text>
 				</View>
 			) : null}

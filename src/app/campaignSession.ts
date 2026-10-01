@@ -108,6 +108,8 @@ export function gameSessionFromPersisted(
 		completed: session.status === 'completed',
 		usedHint: session.usedHint,
 		usedUndo: session.usedUndo,
+		freeHintConsumed: session.freeHintConsumed,
+		freeUndoConsumed: session.freeUndoConsumed,
 	})
 }
 

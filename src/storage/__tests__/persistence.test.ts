@@ -252,7 +252,7 @@ describe('stars persistence', () => {
 		expect(repo.getTotalStars()).toBe(3)
 	})
 
-	it('cold restore preserves usedHint on active session', async () => {
+	it('cold restore preserves usedHint and freeHintConsumed on active session', async () => {
 		const adapter = createMemoryAdapter()
 		const repo = new PersistRepository(adapter)
 		await repo.hydrate()
@@ -273,6 +273,8 @@ describe('stars persistence', () => {
 				counters: { matchesRemoved: 0, appendActions: 0, undoActions: 0 },
 				usedHint: true,
 				usedUndo: false,
+				freeHintConsumed: true,
+				freeUndoConsumed: false,
 			}),
 		)
 
@@ -280,6 +282,48 @@ describe('stars persistence', () => {
 		const root = await repo2.hydrate()
 		expect(root.activeSession?.usedHint).toBe(true)
 		expect(root.activeSession?.usedUndo).toBe(false)
+		expect(root.activeSession?.freeHintConsumed).toBe(true)
+		expect(root.activeSession?.freeUndoConsumed).toBe(false)
+	})
+
+	it('defaults missing free* from used* for pre-split schema v2 saves', () => {
+		const board = sampleBoard()
+		const raw = {
+			...createDefaultRoot(),
+			activeSession: {
+				mode: 'campaign',
+				purpose: 'progression',
+				status: 'in_progress',
+				level: 1,
+				generationVersion: 3,
+				seed: 1,
+				profile: 'EASY',
+				fingerprint: 'f1',
+				density: 7,
+				board: {
+					width: board.width,
+					nextCellSeq: board.nextCellSeq,
+					cells: board.cells.map((c) => ({
+						id: c.id,
+						value: c.value,
+						removed: c.removed,
+					})),
+				},
+				history: [],
+				counters: { matchesRemoved: 0, appendActions: 0, undoActions: 0 },
+				nextCellSeq: board.nextCellSeq,
+				usedHint: true,
+				usedUndo: false,
+				// freeHintConsumed / freeUndoConsumed intentionally omitted
+			},
+		}
+		const parsed = validatePersistedRoot(raw)
+		expect(parsed.ok).toBe(true)
+		if (!parsed.ok) {
+			return
+		}
+		expect(parsed.value.activeSession?.freeHintConsumed).toBe(true)
+		expect(parsed.value.activeSession?.freeUndoConsumed).toBe(false)
 	})
 
 	it('total stars max is 3000', () => {

@@ -83,7 +83,7 @@ describe('hintOutcomeFromSolveResult', () => {
 })
 
 describe('APPLY_HINT star semantics', () => {
-	it('sets usedHint only for delivered match/append', () => {
+	it('sets usedHint and freeHintConsumed only for delivered match/append', () => {
 		const board = boardFromFixture('1 9 2 8')
 		let state = createGameSession(identity(), board)
 		state = reduceGameSession(state, {
@@ -92,6 +92,7 @@ describe('APPLY_HINT star semantics', () => {
 			message: 'x',
 		})
 		expect(state.usedHint).toBe(false)
+		expect(state.freeHintConsumed).toBe(false)
 		expect(state.hintBusy).toBe(false)
 
 		state = reduceGameSession(state, {
@@ -101,14 +102,16 @@ describe('APPLY_HINT star semantics', () => {
 			message: 'ok',
 		})
 		expect(state.usedHint).toBe(true)
+		expect(state.freeHintConsumed).toBe(true)
 	})
 
-	it('SET_HINT_BUSY alone does not set usedHint', () => {
+	it('SET_HINT_BUSY alone does not set usedHint or freeHintConsumed', () => {
 		const board = boardFromFixture('1 9')
 		let state = createGameSession(identity(), board)
 		state = reduceGameSession(state, { type: 'SET_HINT_BUSY', busy: true })
 		expect(state.hintBusy).toBe(true)
 		expect(state.usedHint).toBe(false)
+		expect(state.freeHintConsumed).toBe(false)
 	})
 })
 
