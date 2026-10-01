@@ -20,6 +20,7 @@
     "android:qa": "powershell -ExecutionPolicy Bypass -File ./scripts/android/android-device-qa.ps1"
   },
   "dependencies": {
+    "@appmetrica/react-native-analytics": "^4.2.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.25",
     "expo-linking": "~57.0.11",
@@ -27,7 +28,8 @@
     "expo-system-ui": "~57.0.4",
     "react": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-safe-area-context": "~5.7.0"
+    "react-native-safe-area-context": "~5.7.0",
+    "yandex-mobile-ads": "^8.5.0"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",

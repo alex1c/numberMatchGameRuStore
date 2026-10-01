@@ -4,7 +4,7 @@
  * First-launch CTA → Level 1 (replace). Replay Finish → Home only.
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
 	Pressable,
 	StyleSheet,
@@ -21,6 +21,7 @@ import {
 	type BoardState,
 } from '../../game/core'
 import { useAppState } from '../../app'
+import { trackEvent } from '../../analytics'
 import { strings } from '../../i18n/strings.ru'
 import { spacing, typography, useTheme } from '../../theme'
 import {
@@ -57,6 +58,15 @@ export function TrainingScreen({
 	const [feedback, setFeedback] = useState<string | null>(null)
 	const [finished, setFinished] = useState(false)
 	const [persisting, setPersisting] = useState(false)
+	const trainingStartedRef = useRef(false)
+
+	useEffect(() => {
+		if (trainingStartedRef.current) {
+			return
+		}
+		trainingStartedRef.current = true
+		trackEvent('training_started')
+	}, [])
 
 	const step: TrainingStepDef = TRAINING_STEPS[stepIndex]!
 	const isLast = stepIndex >= TRAINING_STEPS.length - 1
@@ -77,6 +87,7 @@ export function TrainingScreen({
 			try {
 				// Persist trainingCompleted immediately before CTA (§ training).
 				await completeTraining()
+				trackEvent('training_completed')
 			} finally {
 				setPersisting(false)
 			}

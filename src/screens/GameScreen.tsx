@@ -1,5 +1,5 @@
 /**
- * Production Game screen (PHASE 5 campaign flow + Campaign v2 stars).
+ * Production Game screen (PHASE 5 campaign flow + Campaign v2 stars + monetization).
  * Layout: SAFE TOP → HEADER → META → BOARD → STATUS → CONTROLS
  * BannerSlot is owned by AppShell below this screen (above bottom inset).
  */
@@ -14,15 +14,29 @@ import {
 } from 'react-native'
 
 import { useAppState } from '../app'
-import { CAMPAIGN_LEVEL_COUNT } from '../game/campaign'
+import {
+	maybeShowInterstitialAtTransition,
+	notifyCampaignLevelCompleted,
+	notifyCampaignLevelStarted,
+	requestRewarded,
+} from '../ads'
+import { trackEvent } from '../analytics'
+import { CAMPAIGN_LEVEL_COUNT, CAMPAIGN_VERSION } from '../game/campaign'
 import { DENSITY_FIXTURES, loadDensityFixture } from '../dev/density'
 import { CompletionOverlay } from '../components/game/CompletionOverlay'
 import { GameControls } from '../components/game/GameControls'
 import { GameHeader } from '../components/game/GameHeader'
 import { NumberBoard } from '../components/game/NumberBoard'
+import {
+	decideHelpEntitlement,
+	isHelpMonetized,
+	type HelpSource,
+} from '../game/helpPolicy'
 import { strings } from '../i18n/strings.ru'
+import { GENERATION_VERSION } from '../game/generator'
 import { starsFromAttempt } from '../game/stars'
 import { useGameSession } from '../game/session/GameSessionContext'
+import type { HintOutcome } from '../game/session/hintRequest'
 import { spacing, typography, useTheme } from '../theme'
 
 interface GameScreenProps {
@@ -38,6 +52,20 @@ interface GameScreenProps {
  * DEV-only geometry experiment flag — production Game uses AppShell BannerSlot.
  */
 const DEV_SHOW_COORDS_DEFAULT = false
+
+function hintResultParam(outcome: HintOutcome): string {
+	if (outcome.kind === 'match') {
+		return 'match'
+	}
+	if (outcome.kind === 'append') {
+		return 'add_guidance'
+	}
+	return 'unavailable'
+}
+
+function boardRowCount(cellCount: number): number {
+	return Math.ceil(cellCount / 8)
+}
 
 export function GameScreen({
 	onHome,
@@ -56,6 +84,7 @@ export function GameScreen({
 	const {
 		activeSession,
 		sessionSource,
+		bestStars,
 		syncSessionFromGameplay,
 		commitProgressionCompletion,
 		commitReplayCompletion,
@@ -68,15 +97,26 @@ export function GameScreen({
 	const [scrollToEndToken, setScrollToEndToken] = useState(0)
 	const [showDevCoords, setShowDevCoords] = useState(DEV_SHOW_COORDS_DEFAULT)
 	const [nextBusy, setNextBusy] = useState(false)
+	const [helpAdBusy, setHelpAdBusy] = useState(false)
 	const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const completionCommitted = useRef<string | null>(null)
+	const levelStartedKey = useRef<string | null>(null)
+	const levelCompletedAnalyticsKey = useRef<string | null>(null)
 	const lastSyncedKey = useRef<string | null>(null)
 	const nextGuard = useRef(false)
+	const rewardedGuard = useRef(false)
+	/** Latest session for rewarded callbacks (avoids stale closures). */
+	const sessionLiveRef = useRef(session)
+
+	useEffect(() => {
+		sessionLiveRef.current = session
+	}, [session])
 
 	const isCampaign = sessionSource === 'campaign' && activeSession !== null
 	const campaignLevel = activeSession?.level ?? null
 	const campaignPurpose = activeSession?.purpose ?? null
+	const monetized = isHelpMonetized(sessionSource)
 	const densityMeta =
 		sessionSource === 'dev_fixture'
 			? DENSITY_FIXTURES.find(
@@ -122,6 +162,27 @@ export function GameScreen({
 		}, 1600)
 	}, [session?.hintIndices, dispatch, session])
 
+	// Campaign level_started + interstitial suppression clear (once per attempt).
+	useEffect(() => {
+		if (!session || !isCampaign || campaignLevel === null) {
+			return
+		}
+		const key = `${campaignPurpose}:${campaignLevel}:${session.identity.fingerprint}`
+		if (levelStartedKey.current === key) {
+			return
+		}
+		levelStartedKey.current = key
+		notifyCampaignLevelStarted()
+		trackEvent('level_started', {
+			level: campaignLevel,
+			difficulty: session.identity.profile,
+			initialRows: boardRowCount(session.initialBoard.cells.length),
+			purpose: campaignPurpose === 'replay' ? 'replay' : 'progression',
+			campaignVersion: CAMPAIGN_VERSION,
+			generationVersion: GENERATION_VERSION,
+		})
+	}, [campaignLevel, campaignPurpose, isCampaign, session])
+
 	// Sync meaningful gameplay to persistence (not SELECT_CELL-only).
 	useEffect(() => {
 		if (!session || !isCampaign) {
@@ -153,7 +214,7 @@ export function GameScreen({
 		void syncSessionFromGameplay(session)
 	}, [isCampaign, session, syncSessionFromGameplay])
 
-	// Commit campaign completion once (idempotent).
+	// Commit campaign completion once (idempotent) + analytics + interstitial count.
 	useEffect(() => {
 		if (!session?.completed || !isCampaign || !campaignLevel) {
 			return
@@ -168,7 +229,30 @@ export function GameScreen({
 		} else if (campaignPurpose === 'replay') {
 			void commitReplayCompletion(campaignLevel, session)
 		}
+
+		if (levelCompletedAnalyticsKey.current !== commitKey) {
+			levelCompletedAnalyticsKey.current = commitKey
+			notifyCampaignLevelCompleted()
+			const attemptStars = starsFromAttempt({
+				usedHint: session.usedHint,
+				usedUndo: session.usedUndo,
+			})
+			const best = bestStars[campaignLevel - 1] ?? 0
+			trackEvent('level_completed', {
+				level: campaignLevel,
+				difficulty: session.identity.profile,
+				initialRows: boardRowCount(session.initialBoard.cells.length),
+				starsEarnedThisAttempt: attemptStars,
+				bestStars: Math.max(best, attemptStars),
+				usedHint: session.usedHint,
+				usedUndo: session.usedUndo,
+				appendCount: session.counters.appendActions,
+				campaignVersion: CAMPAIGN_VERSION,
+				generationVersion: GENERATION_VERSION,
+			})
+		}
 	}, [
+		bestStars,
 		campaignLevel,
 		campaignPurpose,
 		commitProgressionCompletion,
@@ -186,8 +270,23 @@ export function GameScreen({
 		if (session.completed && isCampaign) {
 			return
 		}
-		if (!isDirty && session.history.length === 0) {
+		const doRestart = () => {
+			if (isCampaign && campaignLevel !== null) {
+				trackEvent('level_restarted', {
+					level: campaignLevel,
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+					appendCount: session.counters.appendActions,
+				})
+			}
 			dispatch({ type: 'RESTART' })
+			// New attempt — allow level_started again for same fingerprint.
+			levelStartedKey.current = null
+			levelCompletedAnalyticsKey.current = null
+			completionCommitted.current = null
+		}
+		if (!isDirty && session.history.length === 0) {
+			doRestart()
 			return
 		}
 		Alert.alert(strings.restartConfirmTitle, strings.restartConfirmBody, [
@@ -195,21 +294,221 @@ export function GameScreen({
 			{
 				text: strings.restartConfirmOk,
 				style: 'destructive',
-				onPress: () => dispatch({ type: 'RESTART' }),
+				onPress: doRestart,
 			},
 		])
-	}, [dispatch, isCampaign, isDirty, session])
+	}, [campaignLevel, dispatch, isCampaign, isDirty, session])
 
 	const handleAppend = useCallback(() => {
+		const before = sessionLiveRef.current
 		dispatch({ type: 'APPEND' })
 		setScrollToEndToken((n) => n + 1)
-	}, [dispatch])
+		if (isCampaign && campaignLevel !== null && before) {
+			const active = before.board.cells.filter((c) => !c.removed).length
+			const resultingRows = boardRowCount(before.board.cells.length + active)
+			trackEvent('numbers_added', {
+				level: campaignLevel,
+				resultingRows,
+				appendCount: before.counters.appendActions + 1,
+			})
+		}
+	}, [campaignLevel, dispatch, isCampaign])
 
 	const handleCellPress = useCallback(
 		(index: number) => {
 			dispatch({ type: 'SELECT_CELL', index })
 		},
 		[dispatch],
+	)
+
+	const runHintWithSource = useCallback(
+		async (source: HelpSource) => {
+			const outcome = await requestHint()
+			if (!outcome || !outcome.delivered) {
+				return
+			}
+			if (isCampaign && campaignLevel !== null) {
+				trackEvent('hint_used', {
+					level: campaignLevel,
+					source: source === 'dev_bypass' ? 'free' : source,
+					result: hintResultParam(outcome),
+				})
+			}
+		},
+		[campaignLevel, isCampaign, requestHint],
+	)
+
+	const handleHint = useCallback(() => {
+		if (!session || session.completed || helpAdBusy || rewardedGuard.current) {
+			return
+		}
+		const decision = decideHelpEntitlement(
+			'hint',
+			{ usedHint: session.usedHint, usedUndo: session.usedUndo },
+			{ monetized, completed: session.completed },
+		)
+		if (!decision.allowed) {
+			return
+		}
+		if (!decision.requiresReward) {
+			void runHintWithSource(decision.source)
+			return
+		}
+
+		Alert.alert(strings.rewardedHintTitle, strings.rewardedHintBody, [
+			{ text: strings.cancel, style: 'cancel' },
+			{
+				text: strings.rewardedWatch,
+				onPress: () => {
+					if (rewardedGuard.current) {
+						return
+					}
+					rewardedGuard.current = true
+					setHelpAdBusy(true)
+					const requestToken = `${session.identity.fingerprint}:${campaignLevel}`
+					void (async () => {
+						try {
+							const result = await requestRewarded({
+								purpose: 'hint',
+								level: campaignLevel ?? undefined,
+								isSessionValid: () => {
+									const live = sessionLiveRef.current
+									if (!live || live.completed) {
+										return false
+									}
+									return (
+										`${live.identity.fingerprint}:${campaignLevel}` ===
+										requestToken
+									)
+								},
+								onGrant: () => {
+									void runHintWithSource('rewarded')
+								},
+							})
+							if (result === 'unavailable' || result === 'busy') {
+								Alert.alert(strings.errorTitle, strings.adUnavailable)
+							}
+						} finally {
+							setHelpAdBusy(false)
+							rewardedGuard.current = false
+						}
+					})()
+				},
+			},
+		])
+	}, [
+		campaignLevel,
+		helpAdBusy,
+		monetized,
+		runHintWithSource,
+		session,
+	])
+
+	const handleUndo = useCallback(() => {
+		if (!session || session.completed || helpAdBusy || rewardedGuard.current) {
+			return
+		}
+		const decision = decideHelpEntitlement(
+			'undo',
+			{ usedHint: session.usedHint, usedUndo: session.usedUndo },
+			{
+				monetized,
+				completed: session.completed,
+				hasUndoHistory: session.history.length > 0,
+			},
+		)
+		if (!decision.allowed) {
+			return
+		}
+		if (!decision.requiresReward) {
+			dispatch({ type: 'UNDO' })
+			if (isCampaign && campaignLevel !== null) {
+				trackEvent('undo_used', {
+					level: campaignLevel,
+					source: decision.source === 'dev_bypass' ? 'free' : decision.source,
+				})
+			}
+			return
+		}
+
+		Alert.alert(strings.rewardedUndoTitle, strings.rewardedUndoBody, [
+			{ text: strings.cancel, style: 'cancel' },
+			{
+				text: strings.rewardedWatch,
+				onPress: () => {
+					if (rewardedGuard.current) {
+						return
+					}
+					rewardedGuard.current = true
+					setHelpAdBusy(true)
+					const requestToken = `${session.identity.fingerprint}:${campaignLevel}`
+					void (async () => {
+						try {
+							const result = await requestRewarded({
+								purpose: 'undo',
+								level: campaignLevel ?? undefined,
+								isSessionValid: () => {
+									const live = sessionLiveRef.current
+									if (!live || live.completed) {
+										return false
+									}
+									if (live.history.length === 0) {
+										return false
+									}
+									return (
+										`${live.identity.fingerprint}:${campaignLevel}` ===
+										requestToken
+									)
+								},
+								onGrant: () => {
+									const live = sessionLiveRef.current
+									if (!live || live.history.length === 0) {
+										return
+									}
+									dispatch({ type: 'UNDO' })
+									if (isCampaign && campaignLevel !== null) {
+										trackEvent('undo_used', {
+											level: campaignLevel,
+											source: 'rewarded',
+										})
+									}
+								},
+							})
+							if (result === 'unavailable' || result === 'busy') {
+								Alert.alert(strings.errorTitle, strings.adUnavailable)
+							}
+						} finally {
+							setHelpAdBusy(false)
+							rewardedGuard.current = false
+						}
+					})()
+				},
+			},
+		])
+	}, [
+		campaignLevel,
+		dispatch,
+		helpAdBusy,
+		isCampaign,
+		monetized,
+		session,
+	])
+
+	/**
+	 * After completion overlay CTA: optionally show interstitial, then navigate.
+	 * Navigation runs exactly once whether the ad shows, fails, or is ineligible.
+	 */
+	const withOptionalInterstitial = useCallback(
+		async (navigate: () => void | Promise<void>) => {
+			if (isCampaign && !isDensityLab) {
+				await maybeShowInterstitialAtTransition({
+					isTraining: false,
+					naturalBoundary: true,
+				})
+			}
+			await navigate()
+		},
+		[isCampaign, isDensityLab],
 	)
 
 	const handleNext = useCallback(async () => {
@@ -219,25 +518,29 @@ export function GameScreen({
 		nextGuard.current = true
 		setNextBusy(true)
 		try {
-			// Ensure progression commit finished before unlocking N+1 (idempotent).
-			await commitProgressionCompletion(campaignLevel, session)
-			const nextLevel = campaignLevel + 1
-			if (nextLevel > CAMPAIGN_LEVEL_COUNT) {
-				onHome()
-				return
-			}
-			const result = await startCampaignLevel(nextLevel, 'progression')
-			if (!result.ok || !result.identity || !result.board) {
-				Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
-				return
-			}
-			completionCommitted.current = null
-			lastSyncedKey.current = null
-			setDismissedCompletionKey(null)
-			startSession(result.identity, result.board, {
-				undoAfterCompletion: false,
+			await withOptionalInterstitial(async () => {
+				// Ensure progression commit finished before unlocking N+1 (idempotent).
+				await commitProgressionCompletion(campaignLevel, session)
+				const nextLevel = campaignLevel + 1
+				if (nextLevel > CAMPAIGN_LEVEL_COUNT) {
+					onHome()
+					return
+				}
+				const result = await startCampaignLevel(nextLevel, 'progression')
+				if (!result.ok || !result.identity || !result.board) {
+					Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
+					return
+				}
+				completionCommitted.current = null
+				levelStartedKey.current = null
+				levelCompletedAnalyticsKey.current = null
+				lastSyncedKey.current = null
+				setDismissedCompletionKey(null)
+				startSession(result.identity, result.board, {
+					undoAfterCompletion: false,
+				})
+				onReplaceGame?.()
 			})
-			onReplaceGame?.()
 		} finally {
 			setNextBusy(false)
 			nextGuard.current = false
@@ -251,6 +554,7 @@ export function GameScreen({
 		session,
 		startCampaignLevel,
 		startSession,
+		withOptionalInterstitial,
 	])
 
 	const handleReplay = useCallback(async () => {
@@ -280,18 +584,22 @@ export function GameScreen({
 		}
 		nextGuard.current = true
 		try {
-			const result = await startCampaignLevel(campaignLevel, 'replay')
-			if (!result.ok || !result.identity || !result.board) {
-				Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
-				return
-			}
-			completionCommitted.current = null
-			lastSyncedKey.current = null
-			setDismissedCompletionKey(null)
-			startSession(result.identity, result.board, {
-				undoAfterCompletion: false,
+			await withOptionalInterstitial(async () => {
+				const result = await startCampaignLevel(campaignLevel, 'replay')
+				if (!result.ok || !result.identity || !result.board) {
+					Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
+					return
+				}
+				completionCommitted.current = null
+				levelStartedKey.current = null
+				levelCompletedAnalyticsKey.current = null
+				lastSyncedKey.current = null
+				setDismissedCompletionKey(null)
+				startSession(result.identity, result.board, {
+					undoAfterCompletion: false,
+				})
+				onReplaceGame?.()
 			})
-			onReplaceGame?.()
 		} finally {
 			nextGuard.current = false
 		}
@@ -302,6 +610,28 @@ export function GameScreen({
 		onReplaceGame,
 		startCampaignLevel,
 		startSession,
+		withOptionalInterstitial,
+	])
+
+	const completionHome = useCallback(() => {
+		if (isDensityLab && onDensityLab) {
+			onDensityLab()
+			return
+		}
+		if (session?.completed && isCampaign) {
+			void withOptionalInterstitial(async () => {
+				onHome()
+			})
+			return
+		}
+		onHome()
+	}, [
+		isCampaign,
+		isDensityLab,
+		onDensityLab,
+		onHome,
+		session?.completed,
+		withOptionalInterstitial,
 	])
 
 	if (!session) {
@@ -320,7 +650,9 @@ export function GameScreen({
 		)
 	}
 
-	const statusText = resolveStatus(session)
+	const statusText = helpAdBusy
+		? strings.adLoading
+		: resolveStatus(session)
 	const appendEnabled =
 		!session.completed &&
 		!session.hasAvailableMoves &&
@@ -364,14 +696,6 @@ export function GameScreen({
 			? 'campaign_replay'
 			: 'campaign_progression'
 
-	const completionHome = () => {
-		if (isDensityLab && onDensityLab) {
-			onDensityLab()
-			return
-		}
-		onHome()
-	}
-
 	return (
 		<View
 			style={[styles.root, { backgroundColor: theme.colors.background }]}
@@ -402,7 +726,9 @@ export function GameScreen({
 				invalidIndices={session.invalidIndices}
 				hintIndices={session.hintIndices}
 				onCellPress={handleCellPress}
-				interactionLocked={session.interactionLocked || session.hintBusy}
+				interactionLocked={
+					session.interactionLocked || session.hintBusy || helpAdBusy
+				}
 				scrollToEndToken={scrollToEndToken}
 				showDevCoords={__DEV__ && showDevCoords}
 			/>
@@ -416,14 +742,14 @@ export function GameScreen({
 
 			{!session.completed ? (
 				<GameControls
-					canUndo={session.history.length > 0}
-					canAppend={appendEnabled}
+					canUndo={session.history.length > 0 && !helpAdBusy}
+					canAppend={appendEnabled && !helpAdBusy}
 					appendPrimary={appendEnabled}
-					canHint={true}
-					hintBusy={session.hintBusy}
-					onUndo={() => dispatch({ type: 'UNDO' })}
+					canHint={!helpAdBusy}
+					hintBusy={session.hintBusy || helpAdBusy}
+					onUndo={handleUndo}
 					onAppend={handleAppend}
-					onHint={requestHint}
+					onHint={handleHint}
 				/>
 			) : null}
 

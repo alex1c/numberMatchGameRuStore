@@ -55,7 +55,11 @@ interface GameSessionContextValue {
 	readonly restoreSession: (state: GameSessionState) => void
 	readonly dispatch: (action: GameSessionAction) => void
 	readonly clearSession: () => void
-	readonly requestHint: () => void
+	/**
+	 * Request a Hint. Resolves with the outcome once busy UI has painted and
+	 * the solver (or stuck→Add path) finishes. Resolves null if ignored.
+	 */
+	readonly requestHint: () => Promise<HintOutcome | null>
 }
 
 const GameSessionContext = createContext<GameSessionContextValue | null>(null)
@@ -151,7 +155,7 @@ export function GameSessionProvider({
 		setSession(null)
 	}, [])
 
-	const requestHint = useCallback(() => {
+	const requestHint = useCallback((): Promise<HintOutcome | null> => {
 		const current = sessionRef.current
 		if (
 			!current ||
@@ -159,7 +163,7 @@ export function GameSessionProvider({
 			current.hintBusy ||
 			hintInFlight.current
 		) {
-			return
+			return Promise.resolve(null)
 		}
 
 		// Accept exactly one request; busy must paint before any solver work.
@@ -171,65 +175,71 @@ export function GameSessionProvider({
 		sessionRef.current = busyNext
 		setSession(busyNext)
 
-		const finish = (outcome: HintOutcome, elapsedMs?: number) => {
-			if (__DEV__ && elapsedMs !== undefined) {
-				console.log(
-					`[NumberMatch] Hint: ${Math.round(elapsedMs)} ms` +
-						(outcome.skippedSolver ? ' (stuck→Add, no solver)' : ''),
-				)
-			}
-			setSession((prev) => {
-				if (!prev) {
-					return prev
-				}
-				const next = reduceGameSession(prev, applyHintOutcome(outcome))
-				sessionRef.current = next
-				return next
-			})
-			hintInFlight.current = false
-			hintPaintCancel.current = null
-		}
-
-		// Fast path: already stuck → emphasize Add, skip expensive solver.
-		const stuck = immediateHintIfStuck(current.board, current.completed)
-		if (stuck) {
-			hintPaintCancel.current = scheduleAfterPaint(() => {
-				finish(stuck, 0)
-			})
-			return
-		}
-
-		hintPaintCancel.current = scheduleAfterPaint(() => {
-			const live = sessionRef.current
-			if (!live || live.completed) {
-				hintInFlight.current = false
-				hintPaintCancel.current = null
-				return
-			}
-			const started = nowMs()
-			try {
-				const result = solveBoard(live.board, HINT_SOLVER_OPTIONS)
-				const elapsed = nowMs() - started
-				if (__DEV__ && elapsed >= 1000) {
-					console.warn(
-						`[NumberMatch] SOLVER PERFORMANCE FOLLOW-UP REQUIRED — Hint ${Math.round(elapsed)} ms`,
+		return new Promise((resolve) => {
+			const finish = (outcome: HintOutcome, elapsedMs?: number) => {
+				if (__DEV__ && elapsedMs !== undefined) {
+					console.log(
+						`[NumberMatch] Hint: ${Math.round(elapsedMs)} ms` +
+							(outcome.skippedSolver
+								? ' (stuck→Add, no solver)'
+								: ''),
 					)
 				}
-				finish(hintOutcomeFromSolveResult(result), elapsed)
-			} catch (err) {
-				if (__DEV__) {
-					console.warn('[NumberMatch] hint error', err)
-				}
-				finish(
-					{
-						kind: 'unavailable',
-						message: strings.hintUnavailable,
-						delivered: false,
-						skippedSolver: false,
-					},
-					nowMs() - started,
-				)
+				setSession((prev) => {
+					if (!prev) {
+						return prev
+					}
+					const next = reduceGameSession(prev, applyHintOutcome(outcome))
+					sessionRef.current = next
+					return next
+				})
+				hintInFlight.current = false
+				hintPaintCancel.current = null
+				resolve(outcome)
 			}
+
+			// Fast path: already stuck → emphasize Add, skip expensive solver.
+			const stuck = immediateHintIfStuck(current.board, current.completed)
+			if (stuck) {
+				hintPaintCancel.current = scheduleAfterPaint(() => {
+					finish(stuck, 0)
+				})
+				return
+			}
+
+			hintPaintCancel.current = scheduleAfterPaint(() => {
+				const live = sessionRef.current
+				if (!live || live.completed) {
+					hintInFlight.current = false
+					hintPaintCancel.current = null
+					resolve(null)
+					return
+				}
+				const started = nowMs()
+				try {
+					const result = solveBoard(live.board, HINT_SOLVER_OPTIONS)
+					const elapsed = nowMs() - started
+					if (__DEV__ && elapsed >= 1000) {
+						console.warn(
+							`[NumberMatch] SOLVER PERFORMANCE FOLLOW-UP REQUIRED — Hint ${Math.round(elapsed)} ms`,
+						)
+					}
+					finish(hintOutcomeFromSolveResult(result), elapsed)
+				} catch (err) {
+					if (__DEV__) {
+						console.warn('[NumberMatch] hint error', err)
+					}
+					finish(
+						{
+							kind: 'unavailable',
+							message: strings.hintUnavailable,
+							delivered: false,
+							skippedSolver: false,
+						},
+						nowMs() - started,
+					)
+				}
+			})
 		})
 	}, [])
 

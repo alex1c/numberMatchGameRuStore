@@ -25,12 +25,13 @@ describe('navigation foundation', () => {
 		).toBe('settings')
 	})
 
-	it('plans Training as a first-class route without banner reservation', () => {
+	it('plans Training without banners; Game/Home/About reserve ads', () => {
 		expect(routeToBannerPlacement('training')).toBe('training')
 		expect(shouldReserveBanner('training')).toBe(false)
 		expect(shouldReserveBanner('home')).toBe(true)
 		expect(shouldReserveBanner('about')).toBe(true)
-		expect(shouldReserveBanner('game')).toBe(false)
+		expect(shouldReserveBanner('game')).toBe(true)
+		expect(shouldReserveBanner('densityLab')).toBe(false)
 	})
 
 	it('pushRoute avoids duplicate top entries', () => {

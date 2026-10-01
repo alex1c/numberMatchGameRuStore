@@ -44,6 +44,16 @@ export const strings = {
 	hintAppend: 'Добавьте числа',
 	hintUnavailable: 'Подсказка пока недоступна',
 	hintReady: 'Подсказка',
+	/** Rewarded help prompts (Campaign monetization). */
+	rewardedHintTitle: 'Бесплатная подсказка уже использована',
+	rewardedHintBody:
+		'Посмотреть короткую рекламу и получить ещё одну?',
+	rewardedUndoTitle: 'Бесплатная отмена уже использована',
+	rewardedUndoBody:
+		'Посмотреть короткую рекламу и отменить ещё один ход?',
+	rewardedWatch: 'Смотреть',
+	adLoading: 'Загрузка рекламы…',
+	adUnavailable: 'Реклама сейчас недоступна. Попробуйте позже.',
 	difficultyEasy: 'Легко',
 	difficultyMedium: 'Средне',
 	difficultyHard: 'Сложно',

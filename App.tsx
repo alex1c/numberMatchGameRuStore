@@ -2,6 +2,8 @@
  * Application shell.
  * Layout contract: CONTENT → BANNER (when reserved) → SAFE AREA inset.
  * Provider order: SafeArea → Theme → AppState → GameSession → shell.
+ *
+ * Ads + AppMetrica initialize once on mount; failures never block gameplay.
  */
 
 import { useEffect, useRef, type ReactElement } from 'react'
@@ -10,6 +12,12 @@ import { StyleSheet, View } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 
 import { AppStateProvider, useAppState } from './src/app'
+import {
+	initializeAds,
+	preloadInterstitial,
+	resolveBannerPlacement,
+} from './src/ads'
+import { initializeAnalytics, trackEvent } from './src/analytics'
 import { BannerSlot } from './src/components/BannerSlot'
 import { TrainingScreen } from './src/features/training'
 import { GameSessionProvider, useGameSession } from './src/game/session/GameSessionContext'
@@ -32,6 +40,26 @@ const PLACEHOLDER_COPY: Partial<
 		title: 'О приложении',
 		note: 'Ссылка на другие наши приложения будет настроена перед релизом.',
 	},
+}
+
+/** Map route → low-cardinality screen_view name (ForestMusic-style). */
+function screenNameForRoute(route: AppRouteName): string | null {
+	switch (route) {
+		case 'home':
+			return 'Home'
+		case 'levels':
+			return 'Levels'
+		case 'game':
+			return 'Game'
+		case 'training':
+			return 'Training'
+		case 'settings':
+			return 'Settings'
+		case 'about':
+			return 'About'
+		default:
+			return null
+	}
 }
 
 /**
@@ -77,8 +105,16 @@ function AppShell() {
 	const { initialRoute, startCampaignLevel, trainingCompleted } = useAppState()
 	const { startSession } = useGameSession()
 	const nav = useAppNavigation(initialRoute)
-	const showBanner =
-		nav.current !== 'training' && nav.current !== 'densityLab'
+	const bannerPlacement = resolveBannerPlacement(nav.current)
+
+	useEffect(() => {
+		const screen = screenNameForRoute(nav.current)
+		if (screen) {
+			trackEvent('screen_view', { screen })
+		}
+		// Intentionally keyed only on route — avoid re-firing on unrelated ticks.
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- nav object identity changes
+	}, [nav.current])
 
 	const startLevel1FromTraining = async () => {
 		const result = await startCampaignLevel(1, 'progression')
@@ -155,7 +191,7 @@ function AppShell() {
 			edges={['top', 'left', 'right']}
 		>
 			<View style={styles.content}>{screen}</View>
-			<BannerSlot visible={showBanner} />
+			<BannerSlot placement={bannerPlacement} />
 			<SafeAreaView
 				edges={['bottom']}
 				style={[
@@ -169,6 +205,13 @@ function AppShell() {
 }
 
 export default function App() {
+	useEffect(() => {
+		initializeAnalytics()
+		initializeAds()
+		trackEvent('app_started')
+		void preloadInterstitial()
+	}, [])
+
 	return (
 		<SafeAreaProvider>
 			<ThemeProvider>
