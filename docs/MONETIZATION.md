@@ -14,13 +14,26 @@ All 1000 Campaign levels remain free. Training is ad-free.
 
 Training and Density Lab: **no ads**.
 
-## Help
+## Rewarded help lifecycle (physical QA fix)
 
-- First Hint / Undo per attempt: free (`usedHint` / `usedUndo` false)
-- Additional: rewarded prompt → grant only on SDK `onRewarded`
-- Restart / new replay: free allowances reset
-- Cold restore: allowances preserved via schema v2 flags
-- Stars: free and rewarded help both set usedHint/usedUndo
+Do **not** recover UI solely from `await ad.show()` — on some Android devices
+the promise never settles after close (ForestMusic `REWARDED_GAME_RELEASE`).
+
+Settlement is driven by:
+
+- verified `onRewarded` (only grant path, once);
+- dismiss / fail-to-show;
+- short grace for close→reward ordering;
+- fail-safe timeout (never invents a reward).
+
+UI phases:
+
+- ad loading/showing → status `Загрузка рекламы…` (Hint button disabled, **not** `Ищу…`);
+- after reward → Hint computation → `Ищу…`;
+- every terminal path clears ad busy.
+
+Free entitlement uses existing schema v2 `usedHint` / `usedUndo` (set only on
+delivered help). Transient ad transaction state is never persisted.
 
 ## Interstitial gate (process session)
 

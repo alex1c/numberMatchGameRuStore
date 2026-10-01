@@ -113,6 +113,12 @@ export function GameScreen({
 		sessionLiveRef.current = session
 	}, [session])
 
+	/** Centralized cleanup for rewarded UI chrome (never leaves Загрузка stuck). */
+	const finalizeRewardedUi = useCallback(() => {
+		setHelpAdBusy(false)
+		rewardedGuard.current = false
+	}, [])
+
 	const isCampaign = sessionSource === 'campaign' && activeSession !== null
 	const campaignLevel = activeSession?.level ?? null
 	const campaignPurpose = activeSession?.purpose ?? null
@@ -370,7 +376,12 @@ export function GameScreen({
 						try {
 							const result = await requestRewarded({
 								purpose: 'hint',
+								sessionToken: requestToken,
 								level: campaignLevel ?? undefined,
+								onSnapshot: (snap) => {
+									// Ad chrome only — never OR into Hint Ищу… busy.
+									setHelpAdBusy(snap.adBusy)
+								},
 								isSessionValid: () => {
 									const live = sessionLiveRef.current
 									if (!live || live.completed) {
@@ -382,15 +393,20 @@ export function GameScreen({
 									)
 								},
 								onGrant: () => {
+									// Reward earned → clear ad chrome, then compute Hint.
+									setHelpAdBusy(false)
 									void runHintWithSource('rewarded')
 								},
 							})
-							if (result === 'unavailable' || result === 'busy') {
+							if (
+								result === 'unavailable' ||
+								result === 'busy' ||
+								result === 'stale_session'
+							) {
 								Alert.alert(strings.errorTitle, strings.adUnavailable)
 							}
 						} finally {
-							setHelpAdBusy(false)
-							rewardedGuard.current = false
+							finalizeRewardedUi()
 						}
 					})()
 				},
@@ -398,6 +414,7 @@ export function GameScreen({
 		])
 	}, [
 		campaignLevel,
+		finalizeRewardedUi,
 		helpAdBusy,
 		monetized,
 		runHintWithSource,
@@ -446,7 +463,11 @@ export function GameScreen({
 						try {
 							const result = await requestRewarded({
 								purpose: 'undo',
+								sessionToken: requestToken,
 								level: campaignLevel ?? undefined,
+								onSnapshot: (snap) => {
+									setHelpAdBusy(snap.adBusy)
+								},
 								isSessionValid: () => {
 									const live = sessionLiveRef.current
 									if (!live || live.completed) {
@@ -461,6 +482,7 @@ export function GameScreen({
 									)
 								},
 								onGrant: () => {
+									setHelpAdBusy(false)
 									const live = sessionLiveRef.current
 									if (!live || live.history.length === 0) {
 										return
@@ -474,12 +496,15 @@ export function GameScreen({
 									}
 								},
 							})
-							if (result === 'unavailable' || result === 'busy') {
+							if (
+								result === 'unavailable' ||
+								result === 'busy' ||
+								result === 'stale_session'
+							) {
 								Alert.alert(strings.errorTitle, strings.adUnavailable)
 							}
 						} finally {
-							setHelpAdBusy(false)
-							rewardedGuard.current = false
+							finalizeRewardedUi()
 						}
 					})()
 				},
@@ -488,6 +513,7 @@ export function GameScreen({
 	}, [
 		campaignLevel,
 		dispatch,
+		finalizeRewardedUi,
 		helpAdBusy,
 		isCampaign,
 		monetized,
@@ -745,8 +771,8 @@ export function GameScreen({
 					canUndo={session.history.length > 0 && !helpAdBusy}
 					canAppend={appendEnabled && !helpAdBusy}
 					appendPrimary={appendEnabled}
-					canHint={!helpAdBusy}
-					hintBusy={session.hintBusy || helpAdBusy}
+					canHint={!helpAdBusy && !session.hintBusy}
+					hintBusy={session.hintBusy}
 					onUndo={handleUndo}
 					onAppend={handleAppend}
 					onHint={handleHint}

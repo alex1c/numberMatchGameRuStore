@@ -1,15 +1,18 @@
 /**
  * Hint/Undo entitlement policy — separated from session/solver core.
  *
- * Free help is tracked via session usedHint / usedUndo (also star flags):
- * - first delivered Hint/Undo per attempt is free
- * - additional requests require a rewarded ad (Campaign only)
- * - failed / unavailable Hint does not consume free allowance
- * - Restart resets both flags (new attempt)
- * - cold restore preserves flags via schema v2 activeSession
+ * Free entitlement vs star flags:
+ * Schema v2 already persists `usedHint` / `usedUndo` on the attempt.
+ * After a *delivered* help action these flags mean both:
+ *   A) stars: assistance was used this attempt
+ *   B) entitlement: the one free Hint/Undo was consumed
+ * They are set only when assistance is actually delivered (not on busy /
+ * solver failure / rewarded failure). No schema bump is required.
  *
- * Star rule: any successfully delivered Hint/Undo sets usedHint/usedUndo
- * even when the entitlement came from a rewarded ad.
+ * Cold restore preserves these attempt facts. Transient ad transaction state
+ * is never persisted.
+ *
+ * Restart / new replay clears both flags (new attempt with free help again).
  */
 
 export type HelpKind = 'hint' | 'undo'
@@ -29,6 +32,16 @@ export interface HelpEntitlementDecision {
 export interface HelpAttemptUsage {
 	readonly usedHint: boolean
 	readonly usedUndo: boolean
+}
+
+/** Explicit alias: free Hint already consumed this attempt (= delivered usedHint). */
+export function isFreeHintConsumed(usage: HelpAttemptUsage): boolean {
+	return usage.usedHint
+}
+
+/** Explicit alias: free Undo already consumed this attempt (= delivered usedUndo). */
+export function isFreeUndoConsumed(usage: HelpAttemptUsage): boolean {
+	return usage.usedUndo
 }
 
 /**
@@ -77,7 +90,8 @@ export function decideHelpEntitlement(
 		}
 	}
 
-	const alreadyUsed = kind === 'hint' ? usage.usedHint : usage.usedUndo
+	const freeConsumed =
+		kind === 'hint' ? isFreeHintConsumed(usage) : isFreeUndoConsumed(usage)
 
 	if (!monetized) {
 		return {
@@ -88,7 +102,7 @@ export function decideHelpEntitlement(
 		}
 	}
 
-	if (!alreadyUsed) {
+	if (!freeConsumed) {
 		return {
 			allowed: true,
 			free: true,
@@ -107,7 +121,7 @@ export function decideHelpEntitlement(
 
 /**
  * Documented behavior when a rewarded ad fails / is unavailable:
- * do not consume entitlement and do not mutate game state.
+ * do not consume entitlement and do not mutate the game.
  */
 export const REWARDED_FAILURE_POLICY =
 	'If rewarded ad fails or is unavailable: do not consume entitlement and do not mutate the game.' as const

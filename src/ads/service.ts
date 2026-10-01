@@ -10,7 +10,6 @@ import {
 	MobileAds,
 	RewardedAdLoader,
 	type InterstitialAd,
-	type RewardedAd,
 } from 'yandex-mobile-ads'
 
 import { trackEvent } from '../analytics'
@@ -26,7 +25,8 @@ import {
 	recordRewardedInteraction,
 	type InterstitialPolicyState,
 } from './policy'
-import { createRewardGrantGuard } from './rewardedPolicy'
+import { createRewardedLifecycle } from './rewardedLifecycle'
+import type { RewardedLifecycleSnapshot } from './rewardedLifecycle'
 
 let adsInitialized = false
 let interstitialLoader: InterstitialAdLoader | null = null
@@ -36,6 +36,7 @@ let interstitialShowing = false
 let interstitialPolicy: InterstitialPolicyState =
 	createInterstitialPolicyState()
 let rewardedBusy = false
+let rewardedRequestSeq = 0
 
 /** Normalize SDK errors into low-cardinality analytics categories. */
 export function normalizeAdErrorCategory(error: unknown): string {
@@ -177,41 +178,73 @@ export type RewardedShowResult =
 	| 'unavailable'
 	| 'busy'
 	| 'cancelled'
+	| 'stale_session'
 
 /**
- * Load + show one rewarded ad. Grant runs only from onRewarded.
- * `isSessionValid` prevents stale grants after level/session change.
+ * Load + show one rewarded ad.
+ *
+ * Settlement is driven by reward / dismiss / fail callbacks (+ fail-safe),
+ * NOT solely by `await ad.show()` — physical devices can close the ad while
+ * the show() promise never resolves (ForestMusic REWARDED_GAME_RELEASE).
+ *
+ * Grant runs only from the verified reward callback, at most once.
  */
 export async function requestRewarded(options: {
 	readonly purpose: RewardPurpose
+	readonly sessionToken: string
 	readonly isSessionValid: () => boolean
 	readonly onGrant: () => void
 	readonly level?: number
+	readonly onSnapshot?: (snapshot: RewardedLifecycleSnapshot) => void
 }): Promise<RewardedShowResult> {
 	if (rewardedBusy) {
 		return 'busy'
 	}
 	rewardedBusy = true
 	interstitialPolicy = recordRewardedInteraction(interstitialPolicy)
+	rewardedRequestSeq += 1
+	const requestId = `rw-${rewardedRequestSeq}`
 
 	trackEvent('ad_rewarded_requested', {
 		reward: options.purpose,
 		...(typeof options.level === 'number' ? { level: options.level } : {}),
 	})
 
-	let ad: RewardedAd | null = null
+	const lifecycle = createRewardedLifecycle({
+		id: requestId,
+		purpose: options.purpose,
+		sessionToken: options.sessionToken,
+		isSessionValid: options.isSessionValid,
+		applyHelp: options.onGrant,
+		onSnapshot: options.onSnapshot,
+	})
+
+	const mapResult = (
+		result: Awaited<ReturnType<typeof lifecycle.waitForSettlement>>,
+	): RewardedShowResult => {
+		switch (result) {
+			case 'granted':
+				return 'granted'
+			case 'cancelled':
+				return 'cancelled'
+			case 'stale_session':
+				return 'stale_session'
+			case 'failed':
+				return 'unavailable'
+			default: {
+				const _exhaustive: never = result
+				return _exhaustive
+			}
+		}
+	}
+
 	try {
 		const loader = await RewardedAdLoader.create()
-		ad = await loader.loadAd({ adUnitId: AD_UNIT_IDS.rewarded })
-		const guard = createRewardGrantGuard(() => {
-			if (!options.isSessionValid()) {
-				return
-			}
-			options.onGrant()
-		}, options.isSessionValid)
+		const ad = await loader.loadAd({ adUnitId: AD_UNIT_IDS.rewarded })
+		lifecycle.markShowing()
 
 		ad.onRewarded = () => {
-			const ok = guard.onVerifiedReward()
+			const ok = lifecycle.onVerifiedReward()
 			if (ok) {
 				trackEvent('ad_rewarded_completed', {
 					reward: options.purpose,
@@ -222,22 +255,36 @@ export async function requestRewarded(options: {
 			}
 		}
 		ad.onAdDismissed = () => {
-			guard.onDismissed()
+			lifecycle.onDismissed()
 		}
 		ad.onAdFailedToShow = () => {
-			guard.onDismissed()
+			lifecycle.onFailed()
 		}
 
-		await ad.show()
-		return guard.hasGranted() ? 'granted' : 'cancelled'
+		// Fire-and-forget show — never block UI recovery on this promise alone.
+		void ad
+			.show()
+			.then(() => {
+				// Some SDK builds resolve show() without a dismiss callback.
+				lifecycle.onDismissed()
+			})
+			.catch(() => {
+				lifecycle.onFailed()
+			})
+
+		const settled = await lifecycle.waitForSettlement()
+		return mapResult(settled)
 	} catch (error) {
 		trackEvent('ad_rewarded_failed', {
 			reward: options.purpose,
 			error_category: normalizeAdErrorCategory(error),
 			...(typeof options.level === 'number' ? { level: options.level } : {}),
 		})
-		return 'unavailable'
+		lifecycle.onFailed()
+		const settled = await lifecycle.waitForSettlement()
+		return mapResult(settled)
 	} finally {
+		lifecycle.dispose()
 		rewardedBusy = false
 	}
 }

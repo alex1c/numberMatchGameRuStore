@@ -1,9 +1,7 @@
-/**
- * Help entitlement / monetization policy tests.
- */
-
 import {
 	decideHelpEntitlement,
+	isFreeHintConsumed,
+	isFreeUndoConsumed,
 	isHelpMonetized,
 } from '../helpPolicy'
 
@@ -27,6 +25,7 @@ describe('decideHelpEntitlement — Hint', () => {
 		expect(d.free).toBe(true)
 		expect(d.requiresReward).toBe(false)
 		expect(d.source).toBe('free')
+		expect(isFreeHintConsumed({ usedHint: false, usedUndo: false })).toBe(false)
 	})
 
 	it('second Hint requires rewarded', () => {
@@ -38,6 +37,7 @@ describe('decideHelpEntitlement — Hint', () => {
 		expect(d.requiresReward).toBe(true)
 		expect(d.free).toBe(false)
 		expect(d.source).toBe('rewarded')
+		expect(isFreeHintConsumed({ usedHint: true, usedUndo: false })).toBe(true)
 	})
 
 	it('DEV fixture bypasses rewarded', () => {
@@ -69,6 +69,7 @@ describe('decideHelpEntitlement — Undo', () => {
 		)
 		expect(d.free).toBe(true)
 		expect(d.requiresReward).toBe(false)
+		expect(isFreeUndoConsumed({ usedHint: false, usedUndo: false })).toBe(false)
 	})
 
 	it('second Undo requires rewarded', () => {
@@ -78,6 +79,7 @@ describe('decideHelpEntitlement — Undo', () => {
 			{ monetized: true, hasUndoHistory: true },
 		)
 		expect(d.requiresReward).toBe(true)
+		expect(isFreeUndoConsumed({ usedHint: false, usedUndo: true })).toBe(true)
 	})
 
 	it('empty history never asks for ad', () => {
@@ -118,5 +120,10 @@ describe('cold restore / restart semantics (documented via flags)', () => {
 			{ monetized: true },
 		)
 		expect(d.free).toBe(true)
+	})
+
+	it('rewarded failure does not change free entitlement flags', () => {
+		expect(isFreeHintConsumed({ usedHint: true, usedUndo: false })).toBe(true)
+		expect(isFreeHintConsumed({ usedHint: false, usedUndo: false })).toBe(false)
 	})
 })

@@ -24,6 +24,17 @@ export type {
 export { createRewardGrantGuard } from './rewardedPolicy'
 export type { RewardGrantGuard } from './rewardedPolicy'
 export {
+	REWARD_AFTER_DISMISS_GRACE_MS,
+	REWARDED_FAILSAFE_MS,
+	createRewardedLifecycle,
+} from './rewardedLifecycle'
+export type {
+	RewardedLifecycleController,
+	RewardedLifecycleResult,
+	RewardedLifecycleSnapshot,
+	RewardedUiPhase,
+} from './rewardedLifecycle'
+export {
 	initializeAds,
 	preloadInterstitial,
 	preloadRewarded,
