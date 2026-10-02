@@ -1,5 +1,9 @@
 /**
- * In-memory GameSession store — survives Home ↔ Game while process lives.
+ * GameSessionProvider — in-memory session + runtime attempt generation.
+ *
+ * `attemptId` is a monotonic runtime token (not persisted). It bumps on every
+ * new gameplay attempt boundary so async ads/hints cannot mutate a later
+ * Restart / Replay / new level that shares the same puzzle fingerprint.
  */
 
 import {
@@ -27,6 +31,7 @@ import {
 	scheduleAfterPaint,
 	type HintOutcome,
 } from './hintRequest'
+import { createMonotonicId } from './attemptIdentity'
 import type {
 	GameSessionAction,
 	GameSessionState,
@@ -46,12 +51,18 @@ interface GameSessionContextValue {
 	readonly session: GameSessionState | null
 	readonly hasSession: boolean
 	readonly isDirty: boolean
+	/**
+	 * Runtime attempt generation — changes on start / restore / Restart / clear.
+	 * Distinct from puzzle fingerprint.
+	 */
+	readonly attemptId: number
+	readonly getAttemptId: () => number
 	readonly startSession: (
 		identity: SessionPuzzleIdentity,
 		board: BoardState,
 		options?: { readonly undoAfterCompletion?: boolean },
 	) => void
-	/** Restore a full session (cold start / persist hydrate). */
+	/** Restore a full session (cold start / persist hydrate / Continue). */
 	readonly restoreSession: (state: GameSessionState) => void
 	readonly dispatch: (action: GameSessionAction) => void
 	readonly clearSession: () => void
@@ -86,9 +97,19 @@ export function GameSessionProvider({
 	readonly children: ReactNode
 }) {
 	const [session, setSession] = useState<GameSessionState | null>(null)
+	const [attemptId, setAttemptId] = useState(0)
 	const sessionRef = useRef<GameSessionState | null>(null)
+	const attemptIdRef = useRef(0)
+	const attemptCounter = useRef(createMonotonicId(0))
 	const hintInFlight = useRef(false)
 	const hintPaintCancel = useRef<{ cancel: () => void } | null>(null)
+
+	const bumpAttempt = useCallback(() => {
+		const next = attemptCounter.current.next()
+		attemptIdRef.current = next
+		setAttemptId(next)
+		return next
+	}, [])
 
 	useEffect(() => {
 		sessionRef.current = session
@@ -111,6 +132,7 @@ export function GameSessionProvider({
 			hintPaintCancel.current?.cancel()
 			hintPaintCancel.current = null
 			hintInFlight.current = false
+			bumpAttempt()
 			const next = createGameSession(identity, board)
 			const withPolicy =
 				options?.undoAfterCompletion === undefined
@@ -121,39 +143,58 @@ export function GameSessionProvider({
 			if (__DEV__) {
 				console.log(
 					`[NumberMatch] session start ${identity.label} ` +
-						`seed=${identity.seed} fp=${identity.fingerprint}`,
+						`seed=${identity.seed} fp=${identity.fingerprint} ` +
+						`attempt=${attemptIdRef.current}`,
 				)
 			}
 		},
-		[],
+		[bumpAttempt],
 	)
 
-	const restoreSession = useCallback((state: GameSessionState) => {
-		hintPaintCancel.current?.cancel()
-		hintPaintCancel.current = null
-		hintInFlight.current = false
-		sessionRef.current = state
-		setSession(state)
-	}, [])
+	const restoreSession = useCallback(
+		(state: GameSessionState) => {
+			hintPaintCancel.current?.cancel()
+			hintPaintCancel.current = null
+			hintInFlight.current = false
+			// New runtime generation so prior-screen async ops cannot bleed in.
+			// Persisted board/history/help come from `state` unchanged.
+			bumpAttempt()
+			sessionRef.current = state
+			setSession(state)
+		},
+		[bumpAttempt],
+	)
 
-	const dispatch = useCallback((action: GameSessionAction) => {
-		setSession((prev) => {
-			if (!prev) {
-				return prev
+	const dispatch = useCallback(
+		(action: GameSessionAction) => {
+			if (action.type === 'RESTART') {
+				hintPaintCancel.current?.cancel()
+				hintPaintCancel.current = null
+				hintInFlight.current = false
+				bumpAttempt()
 			}
-			const next = reduceGameSession(prev, action)
-			sessionRef.current = next
-			return next
-		})
-	}, [])
+			setSession((prev) => {
+				if (!prev) {
+					return prev
+				}
+				const next = reduceGameSession(prev, action)
+				sessionRef.current = next
+				return next
+			})
+		},
+		[bumpAttempt],
+	)
 
 	const clearSession = useCallback(() => {
 		hintPaintCancel.current?.cancel()
 		hintPaintCancel.current = null
 		hintInFlight.current = false
+		bumpAttempt()
 		sessionRef.current = null
 		setSession(null)
-	}, [])
+	}, [bumpAttempt])
+
+	const getAttemptId = useCallback(() => attemptIdRef.current, [])
 
 	const requestHint = useCallback((): Promise<HintOutcome | null> => {
 		const current = sessionRef.current
@@ -166,6 +207,7 @@ export function GameSessionProvider({
 			return Promise.resolve(null)
 		}
 
+		const hintAttemptId = attemptIdRef.current
 		// Accept exactly one request; busy must paint before any solver work.
 		hintInFlight.current = true
 		const busyNext = reduceGameSession(current, {
@@ -177,6 +219,12 @@ export function GameSessionProvider({
 
 		return new Promise((resolve) => {
 			const finish = (outcome: HintOutcome, elapsedMs?: number) => {
+				if (attemptIdRef.current !== hintAttemptId) {
+					hintInFlight.current = false
+					hintPaintCancel.current = null
+					resolve(null)
+					return
+				}
 				if (__DEV__ && elapsedMs !== undefined) {
 					console.log(
 						`[NumberMatch] Hint: ${Math.round(elapsedMs)} ms` +
@@ -186,7 +234,7 @@ export function GameSessionProvider({
 					)
 				}
 				setSession((prev) => {
-					if (!prev) {
+					if (!prev || attemptIdRef.current !== hintAttemptId) {
 						return prev
 					}
 					const next = reduceGameSession(prev, applyHintOutcome(outcome))
@@ -208,6 +256,12 @@ export function GameSessionProvider({
 			}
 
 			hintPaintCancel.current = scheduleAfterPaint(() => {
+				if (attemptIdRef.current !== hintAttemptId) {
+					hintInFlight.current = false
+					hintPaintCancel.current = null
+					resolve(null)
+					return
+				}
 				const live = sessionRef.current
 				if (!live || live.completed) {
 					hintInFlight.current = false
@@ -255,6 +309,8 @@ export function GameSessionProvider({
 			session,
 			hasSession: session !== null,
 			isDirty,
+			attemptId,
+			getAttemptId,
 			startSession,
 			restoreSession,
 			dispatch,
@@ -264,6 +320,8 @@ export function GameSessionProvider({
 		[
 			session,
 			isDirty,
+			attemptId,
+			getAttemptId,
 			startSession,
 			restoreSession,
 			dispatch,

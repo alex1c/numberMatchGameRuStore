@@ -9,6 +9,11 @@ export {
 } from './config'
 export type { DailySpec } from './config'
 export {
+	currentLocalDateKey,
+	getLocalNow,
+	__setLocalNowForTests,
+} from './clock'
+export {
 	dateFromLocalDateKey,
 	daysBetweenLocalDates,
 	formatLocalDateRu,

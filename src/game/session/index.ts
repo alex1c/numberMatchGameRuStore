@@ -23,6 +23,15 @@ export {
 export type { HintKind, HintOutcome } from './hintRequest'
 
 export { GameSessionProvider, useGameSession } from './GameSessionContext'
+export {
+	createMonotonicId,
+	isTransitionTokenCurrent,
+} from './attemptIdentity'
+export type {
+	AttemptScopedToken,
+	ScreenScopedToken,
+	TransitionToken,
+} from './attemptIdentity'
 
 export {
 	DEV_EXTENDED_FIXTURES,
