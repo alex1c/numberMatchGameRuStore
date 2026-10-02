@@ -81,6 +81,11 @@ export const strings = {
 	devResetProgress: 'DEV сброс прогресса',
 	devSection: 'DEV',
 	homeSubtitle: 'Соединяйте числа — равные или в сумме 10',
+	/** Compact Home: current level + mastery stars on one line. */
+	homeProgressCompact: (level: number, stars: number, maxStars: number) =>
+		`Уровень ${level} · ★ ${stars} / ${maxStars}`,
+	homeProgressComplete: (stars: number, maxStars: number) =>
+		`Кампания пройдена · ★ ${stars} / ${maxStars}`,
 	trainingNote: 'Короткое интерактивное обучение',
 	progressCleared: (cleared: number, total: number) =>
 		`Пройдено: ${cleared} из ${total}`,
@@ -178,6 +183,7 @@ export const strings = {
 	aboutWebsite: 'Сайт ForestMusic',
 	aboutOtherApps: 'Другие приложения',
 	aboutPrivacy: 'Политика конфиденциальности',
+	aboutFeedback: 'Написать разработчику',
 	aboutLinkFailed: (label: string) =>
 		`Не удалось открыть «${label}». Проверьте браузер или ссылку.`,
 	rulesTitle: 'Правила',
@@ -191,6 +197,7 @@ export const strings = {
 	navStatistics: 'Статистика',
 	navAchievements: 'Достижения',
 	navSettings: 'Настройки',
+	navAbout: 'О приложении',
 } as const
 
 function pluralDays(count: number): string {

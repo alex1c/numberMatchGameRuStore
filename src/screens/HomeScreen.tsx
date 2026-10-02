@@ -1,5 +1,5 @@
 /**
- * Production Home — campaign CTA, levels, training replay.
+ * Production Home — compact Campaign CTA, Daily, and hub menu.
  * DEV fixtures stay below the fold and never persist campaign activeSession.
  */
 
@@ -59,6 +59,12 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 
 	const frontier = frontierLevel(highestCompletedLevel)
 	const campaignDone = highestCompletedLevel >= CAMPAIGN_LEVEL_COUNT
+	const maxStars = CAMPAIGN_LEVEL_COUNT * 3
+	const progressLevel = campaignDone
+		? CAMPAIGN_LEVEL_COUNT
+		: activeSession?.status === 'in_progress'
+			? activeSession.level
+			: frontier
 
 	const primaryCta = resolvePrimaryCta({
 		activeSession,
@@ -178,6 +184,12 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 		])
 	}, [clearActiveSession, clearSession, resetProgress])
 
+	const dailyStatusLine = dailySummary.completedToday
+		? strings.dailyCardDone(dailySummary.bestStarsToday)
+		: dailySummary.hasActiveSession
+			? strings.dailyCardContinue
+			: strings.dailyCardOpen
+
 	return (
 		<ScrollView
 			style={{ flex: 1, backgroundColor: theme.colors.background }}
@@ -193,28 +205,15 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 			<Text style={[styles.subtitle, { color: theme.colors.textMuted }]}>
 				{strings.homeBrandEn}
 			</Text>
-			<Text style={[styles.note, { color: theme.colors.textMuted }]}>
-				{strings.homeSubtitle}
-			</Text>
-			<Text style={[styles.note, { color: theme.colors.textMuted }]}>
-				{campaignDone
-					? strings.campaignComplete
-					: strings.progressCleared(
-							highestCompletedLevel,
-							CAMPAIGN_LEVEL_COUNT,
-						)}
-			</Text>
+
 			<Text
-				style={[styles.note, { color: theme.colors.textMuted }]}
-				testID="home-stars-total"
+				style={[styles.progress, { color: theme.colors.textMuted }]}
+				testID="home-progress-compact"
 			>
-				{strings.starsMastery(totalStars, CAMPAIGN_LEVEL_COUNT * 3)}
+				{campaignDone
+					? strings.homeProgressComplete(totalStars, maxStars)
+					: strings.homeProgressCompact(progressLevel, totalStars, maxStars)}
 			</Text>
-			{!campaignDone ? (
-				<Text style={[styles.note, { color: theme.colors.textMuted }]}>
-					{strings.progressLevel(frontier, CAMPAIGN_LEVEL_COUNT)}
-				</Text>
-			) : null}
 
 			<Pressable
 				onPress={handlePrimary}
@@ -266,37 +265,17 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 					{strings.dailyCardTitle}
 				</Text>
 				<Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>
-					{dailySummary.completedToday
-						? strings.dailyCardDone(dailySummary.bestStarsToday)
-						: dailySummary.hasActiveSession
-							? strings.dailyCardContinue
-							: strings.dailyCardOpen}
-				</Text>
-				<Text style={{ color: theme.colors.accent, fontSize: 13 }}>
-					{strings.dailyStreakActive(dailySummary.activeStreak)}
-				</Text>
-			</Pressable>
-
-			<Pressable
-				onPress={() => onNavigate('training')}
-				style={[styles.link, { borderColor: theme.colors.border }]}
-				testID="nav-training"
-				accessibilityRole="button"
-				accessibilityLabel={strings.training}
-			>
-				<Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-					{strings.training}
-				</Text>
-				<Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>
-					{strings.trainingNote}
+					{`${dailyStatusLine} · ${strings.dailyStreakActive(dailySummary.activeStreak)}`}
 				</Text>
 			</Pressable>
 
 			{(
 				[
+					['training', strings.training],
 					['statistics', strings.navStatistics],
 					['achievements', strings.navAchievements],
 					['settings', strings.navSettings],
+					['about', strings.navAbout],
 				] as const
 			).map(([route, label]) => (
 				<Pressable
@@ -304,6 +283,8 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 					onPress={() => onNavigate(route)}
 					style={[styles.link, { borderColor: theme.colors.border }]}
 					testID={`nav-${route}`}
+					accessibilityRole="button"
+					accessibilityLabel={label}
 				>
 					<Text style={{ color: theme.colors.text, fontWeight: '600' }}>
 						{label}
@@ -478,9 +459,9 @@ const styles = StyleSheet.create({
 	root: {
 		alignItems: 'stretch',
 		paddingHorizontal: spacing.lg,
-		paddingVertical: spacing.lg,
+		paddingTop: spacing.md,
+		paddingBottom: spacing.lg,
 		gap: spacing.sm,
-		paddingBottom: spacing.xl,
 	},
 	title: {
 		...typography.title,
@@ -489,6 +470,12 @@ const styles = StyleSheet.create({
 	subtitle: {
 		...typography.subtitle,
 		textAlign: 'center',
+		marginBottom: spacing.xs,
+	},
+	progress: {
+		...typography.caption,
+		textAlign: 'center',
+		marginBottom: spacing.xs,
 	},
 	note: {
 		...typography.caption,
@@ -522,9 +509,9 @@ const styles = StyleSheet.create({
 	dailyCard: {
 		borderWidth: StyleSheet.hairlineWidth,
 		borderRadius: 12,
-		paddingVertical: spacing.md,
+		paddingVertical: spacing.sm,
 		paddingHorizontal: spacing.md,
-		gap: 4,
+		gap: 2,
 	},
 	devBlock: {
 		marginTop: spacing.lg,

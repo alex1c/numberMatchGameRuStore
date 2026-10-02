@@ -13,6 +13,7 @@ import {
 } from 'yandex-mobile-ads'
 
 import { trackEvent } from '../analytics'
+import { isScreenshotQaMode } from '../dev/screenshotQaMode'
 import { AD_UNIT_IDS, type RewardPurpose } from './config'
 import {
 	canShowInterstitial,
@@ -128,6 +129,10 @@ export async function maybeShowInterstitialAtTransition(options: {
 	readonly naturalBoundary: boolean
 	readonly nowMs?: number
 }): Promise<boolean> {
+	// Store-capture mode never auto-shows interstitial.
+	if (isScreenshotQaMode()) {
+		return false
+	}
 	const nowMs = options.nowMs ?? monotonicNowMs()
 
 	if (

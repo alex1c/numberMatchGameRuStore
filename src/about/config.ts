@@ -22,7 +22,12 @@ export const ABOUT_OTHER_APPS_URL =
 export const ABOUT_PRIVACY_URL =
 	'https://alex1c.github.io/numberMatchGameRuStore/' as const
 
-/** Optional support mailto — omit until a shared ForestMusic support inbox is confirmed. */
+/**
+ * Verified ForestMusic RuStore support contact (same mailbox as sibling apps).
+ */
+export const ABOUT_SUPPORT_EMAIL = 'rustore-alex1c@yandex.ru' as const
+
+export const ABOUT_SUPPORT_MAILTO = `mailto:${ABOUT_SUPPORT_EMAIL}` as const
 
 /**
  * Version for About UI — same source as expo `version` (app.json / EAS build).

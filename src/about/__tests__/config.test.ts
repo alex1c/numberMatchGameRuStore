@@ -7,6 +7,7 @@ import {
 	ABOUT_DEVELOPER,
 	ABOUT_OTHER_APPS_URL,
 	ABOUT_PRIVACY_URL,
+	ABOUT_SUPPORT_EMAIL,
 	ABOUT_WEBSITE_URL,
 	APP_DISPLAY_NAME_SHORT,
 	APP_VERSION,
@@ -18,6 +19,7 @@ describe('about config', () => {
 		expect(ABOUT_APP_NAME).toContain('Number Match')
 		expect(ABOUT_DEVELOPER).toBe('ForestMusic')
 		expect(APP_VERSION).toMatch(/^\d+\.\d+\.\d+/)
+		expect(ABOUT_SUPPORT_EMAIL).toBe('rustore-alex1c@yandex.ru')
 	})
 
 	it('includes canonical https links', () => {

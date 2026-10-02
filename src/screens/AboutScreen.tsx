@@ -9,6 +9,8 @@ import {
 	ABOUT_DEVELOPER,
 	ABOUT_OTHER_APPS_URL,
 	ABOUT_PRIVACY_URL,
+	ABOUT_SUPPORT_EMAIL,
+	ABOUT_SUPPORT_MAILTO,
 	ABOUT_WEBSITE_URL,
 	APP_VERSION,
 } from '../about/config'
@@ -67,6 +69,12 @@ export function AboutScreen({ onBack }: AboutScreenProps) {
 					label={strings.aboutPrivacy}
 					onPress={() =>
 						void openExternal(ABOUT_PRIVACY_URL, strings.aboutPrivacy)
+					}
+				/>
+				<LinkButton
+					label={strings.aboutFeedback}
+					onPress={() =>
+						void openExternal(ABOUT_SUPPORT_MAILTO, ABOUT_SUPPORT_EMAIL)
 					}
 				/>
 			</View>

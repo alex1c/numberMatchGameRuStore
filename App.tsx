@@ -20,6 +20,7 @@ import {
 import { initializeAnalytics, trackEvent } from './src/analytics'
 import { AchievementToast } from './src/components/AchievementToast'
 import { BannerSlot } from './src/components/BannerSlot'
+import { isScreenshotQaMode } from './src/dev/screenshotQaMode'
 import { TrainingScreen } from './src/features/training'
 import { GameSessionProvider, useGameSession } from './src/game/session/GameSessionContext'
 import { useAppNavigation, type AppRouteName } from './src/navigation'
@@ -123,7 +124,9 @@ function AppShell() {
 	} = useAppState()
 	const { startSession } = useGameSession()
 	const nav = useAppNavigation(initialRoute)
-	const bannerPlacement = resolveBannerPlacement(nav.current)
+	const bannerPlacement = isScreenshotQaMode()
+		? null
+		: resolveBannerPlacement(nav.current)
 
 	useEffect(() => {
 		const screen = screenNameForRoute(nav.current)
