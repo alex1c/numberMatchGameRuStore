@@ -36,6 +36,7 @@ export type {
 } from './rewardedLifecycle'
 export {
 	INTERSTITIAL_FAILSAFE_MS,
+	INTERSTITIAL_SHOW_INIT_TIMEOUT_MS,
 	createInterstitialLifecycle,
 } from './interstitialLifecycle'
 export type {
@@ -45,14 +46,25 @@ export type {
 	InterstitialUiPhase,
 } from './interstitialLifecycle'
 export {
+	loadRewardedAdOwned,
+} from './rewardedLoadOwnership'
+export type {
+	DisposableRewardedAd,
+	OwnedRewardedLoadResult,
+	RewardedLoaderHandle,
+} from './rewardedLoadOwnership'
+export {
 	initializeAds,
 	preloadInterstitial,
 	preloadRewarded,
 	maybeShowInterstitialAtTransition,
+	cancelActiveInterstitialTransition,
 	notifyCampaignLevelCompleted,
 	notifyCampaignLevelStarted,
 	requestRewarded,
 	normalizeAdErrorCategory,
 	getInterstitialDiagnostics,
+	REWARDED_LOAD_TIMEOUT_MS,
+	__setRewardedLoaderFactoryForTests,
 } from './service'
 export type { RewardedShowResult } from './service'

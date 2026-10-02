@@ -27,8 +27,14 @@ import {
 	type InterstitialPolicyState,
 } from './policy'
 import { createInterstitialLifecycle } from './interstitialLifecycle'
+import type { InterstitialLifecycleController } from './interstitialLifecycle'
 import { createRewardedLifecycle } from './rewardedLifecycle'
 import type { RewardedLifecycleSnapshot } from './rewardedLifecycle'
+import {
+	loadRewardedAdOwned,
+	type DisposableRewardedAd,
+	type RewardedLoaderHandle,
+} from './rewardedLoadOwnership'
 
 let adsInitialized = false
 let interstitialLoader: InterstitialAdLoader | null = null
@@ -36,13 +42,40 @@ let loadedInterstitial: InterstitialAd | null = null
 let interstitialLoading = false
 let interstitialShowing = false
 let interstitialRequestSeq = 0
+let activeInterstitialLifecycle: InterstitialLifecycleController | null = null
+let activeInterstitialAd: InterstitialAd | null = null
 let interstitialPolicy: InterstitialPolicyState =
 	createInterstitialPolicyState()
 let rewardedBusy = false
 let rewardedRequestSeq = 0
 
-/** Fail-safe so a hung native loadAd() cannot lock rewarded forever. */
-const REWARDED_LOAD_TIMEOUT_MS = 45_000
+/**
+ * Bound rewarded load so hung native loadAd cannot lock help forever.
+ * Late results after timeout are disposed via loadRewardedAdOwned.
+ */
+export const REWARDED_LOAD_TIMEOUT_MS = 45_000
+
+type RewardedLoaderFactory = () => Promise<RewardedLoaderHandle>
+
+const defaultRewardedLoaderFactory: RewardedLoaderFactory = async () => {
+	const loader = await RewardedAdLoader.create()
+	return {
+		loadAd: async (params) => {
+			const ad = await loader.loadAd(params)
+			return ad as unknown as DisposableRewardedAd
+		},
+		cancelLoading: () => loader.cancelLoading(),
+	}
+}
+
+let rewardedLoaderFactory: RewardedLoaderFactory = defaultRewardedLoaderFactory
+
+/** Jest seam — inject fake loader / ads for ownership tests. */
+export function __setRewardedLoaderFactoryForTests(
+	factory: RewardedLoaderFactory | null,
+): void {
+	rewardedLoaderFactory = factory ?? defaultRewardedLoaderFactory
+}
 
 /** Normalize SDK errors into low-cardinality analytics categories. */
 export function normalizeAdErrorCategory(error: unknown): string {
@@ -126,16 +159,41 @@ export function notifyCampaignLevelCompleted(): void {
 }
 
 /**
+ * Cancel any in-flight interstitial transition (unmount / Restart / new attempt).
+ * Late dismiss/fail/show Promise become no-ops after cancel.
+ */
+export function cancelActiveInterstitialTransition(): void {
+	const lifecycle = activeInterstitialLifecycle
+	const ad = activeInterstitialAd
+	activeInterstitialLifecycle = null
+	activeInterstitialAd = null
+	if (lifecycle) {
+		lifecycle.cancel()
+	}
+	if (ad) {
+		try {
+			// Runtime has public delete(); TS typings mark it private.
+			;(ad as unknown as { delete: () => void }).delete()
+		} catch {
+			// ignore
+		}
+	}
+	interstitialShowing = false
+}
+
+/**
  * Show interstitial only when policy + cached ad allow it.
  *
- * Settlement is driven by dismiss / fail callbacks (+ fail-safe), NOT solely
- * by `await ad.show()` — Android Yandex can dismiss while show() never settles.
+ * Settlement is driven by dismiss / fail / onAdShown-gated init timeout (+
+ * explicit cancel), NOT solely by `await ad.show()`.
  * Navigation callers await this function; it resolves exactly once per request.
  */
 export async function maybeShowInterstitialAtTransition(options: {
 	readonly isTraining: boolean
 	readonly naturalBoundary: boolean
 	readonly nowMs?: number
+	/** Optional external cancel probe (screen/attempt/transition token). */
+	readonly isStillCurrent?: () => boolean
 }): Promise<boolean> {
 	// Store-capture mode never auto-shows interstitial.
 	if (isScreenshotQaMode()) {
@@ -167,6 +225,10 @@ export async function maybeShowInterstitialAtTransition(options: {
 		return false
 	}
 
+	if (options.isStillCurrent && !options.isStillCurrent()) {
+		return false
+	}
+
 	const ad = loadedInterstitial
 	loadedInterstitial = null
 	interstitialShowing = true
@@ -175,8 +237,13 @@ export async function maybeShowInterstitialAtTransition(options: {
 	const requestId = `is-${interstitialRequestSeq}`
 
 	const lifecycle = createInterstitialLifecycle({ id: requestId })
-	lifecycle.markShowing()
+	activeInterstitialLifecycle = lifecycle
+	activeInterstitialAd = ad
+	lifecycle.markShowRequested()
 
+	ad.onAdShown = () => {
+		lifecycle.onAdShown()
+	}
 	ad.onAdDismissed = () => {
 		lifecycle.onDismissed()
 	}
@@ -190,19 +257,33 @@ export async function maybeShowInterstitialAtTransition(options: {
 			.show()
 			.then(() => {
 				// Some SDK builds resolve show() without a dismiss callback.
-				lifecycle.onDismissed()
+				// Only treat as dismiss if already visible or never shown.
+				const snap = lifecycle.snapshot()
+				if (!snap.settled) {
+					if (snap.visible) {
+						lifecycle.onDismissed()
+					} else {
+						// show() resolved without onAdShown — still wait for
+						// dismiss/fail/init-timeout; do not invent dismiss yet.
+					}
+				}
 			})
 			.catch(() => {
 				lifecycle.onFailed()
 			})
 
 		const settled = await lifecycle.waitForSettlement()
+		if (options.isStillCurrent && !options.isStillCurrent()) {
+			lifecycle.cancel()
+			return false
+		}
 		if (settled === 'dismissed') {
 			trackEvent('ad_interstitial_shown', {})
 			return true
 		}
 		trackEvent('ad_interstitial_failed', {
-			error_category: settled === 'cancelled' ? 'cancelled' : 'show_failed',
+			error_category:
+				settled === 'cancelled' ? 'cancelled' : 'show_failed',
 		})
 		return false
 	} catch (error) {
@@ -213,7 +294,18 @@ export async function maybeShowInterstitialAtTransition(options: {
 		})
 		return false
 	} finally {
+		if (activeInterstitialLifecycle === lifecycle) {
+			activeInterstitialLifecycle = null
+		}
+		if (activeInterstitialAd === ad) {
+			activeInterstitialAd = null
+		}
 		lifecycle.dispose()
+		try {
+			;(ad as unknown as { delete: () => void }).delete()
+		} catch {
+			// ignore
+		}
 		interstitialShowing = false
 		void preloadInterstitial()
 	}
@@ -230,10 +322,11 @@ export type RewardedShowResult =
  * Load + show one rewarded ad.
  *
  * Settlement is driven by reward / dismiss / fail callbacks (+ fail-safe),
- * NOT solely by `await ad.show()` — physical devices can close the ad while
- * the show() promise never resolves (ForestMusic REWARDED_GAME_RELEASE).
+ * NOT solely by `await ad.show()`.
  *
- * Grant runs only from the verified reward callback, at most once.
+ * Load ownership: timeout / abandon / stale_session always dispose late ads.
+ * Grant runs only from the verified reward callback, at most once, and only
+ * when `isSessionValid()` (attempt token) still matches.
  */
 export async function requestRewarded(options: {
 	readonly purpose: RewardPurpose
@@ -284,25 +377,36 @@ export async function requestRewarded(options: {
 		}
 	}
 
+	let loadOwnership: Awaited<ReturnType<typeof loadRewardedAdOwned>> | null =
+		null
+
 	try {
 		lifecycle.markLoading()
-		const loader = await RewardedAdLoader.create()
-		// Bound load so a hung native loadAd Promise cannot lock help forever.
-		const ad = await Promise.race([
-			loader.loadAd({ adUnitId: AD_UNIT_IDS.rewarded }),
-			new Promise<never>((_, reject) => {
-				setTimeout(
-					() => reject(new Error('rewarded_load_timeout')),
-					REWARDED_LOAD_TIMEOUT_MS,
-				)
-			}),
-		])
-		lifecycle.markShowing()
-		// Session may have unmounted / restarted while load was in flight.
+		const loader = await rewardedLoaderFactory()
+		loadOwnership = await loadRewardedAdOwned({
+			loader,
+			adUnitId: AD_UNIT_IDS.rewarded,
+			timeoutMs: REWARDED_LOAD_TIMEOUT_MS,
+			isAbandoned: () => !options.isSessionValid(),
+		})
+
+		if (loadOwnership.timedOut || !loadOwnership.ad) {
+			loadOwnership.disposeLateOrUnused()
+			lifecycle.onFailed()
+			const settled = await lifecycle.waitForSettlement()
+			return mapResult(settled)
+		}
+
+		const ad = loadOwnership.ad
+
+		// Session may have Restarted / unmounted while load was in flight.
 		if (!options.isSessionValid()) {
+			loadOwnership.disposeLateOrUnused()
 			lifecycle.dispose()
 			return 'stale_session'
 		}
+
+		lifecycle.markShowing()
 
 		ad.onRewarded = () => {
 			const ok = lifecycle.onVerifiedReward()
@@ -326,7 +430,6 @@ export async function requestRewarded(options: {
 		void ad
 			.show()
 			.then(() => {
-				// Some SDK builds resolve show() without a dismiss callback.
 				lifecycle.onDismissed()
 			})
 			.catch(() => {
@@ -336,6 +439,7 @@ export async function requestRewarded(options: {
 		const settled = await lifecycle.waitForSettlement()
 		return mapResult(settled)
 	} catch (error) {
+		loadOwnership?.disposeLateOrUnused()
 		trackEvent('ad_rewarded_failed', {
 			reward: options.purpose,
 			error_category: normalizeAdErrorCategory(error),
@@ -346,6 +450,8 @@ export async function requestRewarded(options: {
 		return mapResult(settled)
 	} finally {
 		lifecycle.dispose()
+		// After show lifecycle ends, delete the ad to release native listeners.
+		loadOwnership?.disposeLateOrUnused()
 		rewardedBusy = false
 	}
 }

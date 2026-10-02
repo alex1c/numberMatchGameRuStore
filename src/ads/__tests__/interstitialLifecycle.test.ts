@@ -3,7 +3,7 @@
  */
 
 import {
-	INTERSTITIAL_FAILSAFE_MS,
+	INTERSTITIAL_SHOW_INIT_TIMEOUT_MS,
 	createInterstitialLifecycle,
 } from '../interstitialLifecycle'
 
@@ -16,18 +16,23 @@ describe('interstitial lifecycle callback orders', () => {
 	})
 
 	it('dismiss while show Promise unresolved settles once', async () => {
-		const lifecycle = createInterstitialLifecycle({ id: 'i1', failSafeMs: 50_000 })
+		const lifecycle = createInterstitialLifecycle({
+			id: 'i1',
+			showInitTimeoutMs: 50_000,
+		})
 		lifecycle.markShowing()
 		lifecycle.onDismissed()
 		await expect(lifecycle.waitForSettlement()).resolves.toBe('dismissed')
-		// Late show Promise settlement must be a no-op.
 		lifecycle.onDismissed()
 		lifecycle.onFailed()
 		expect(lifecycle.snapshot().result).toBe('dismissed')
 	})
 
 	it('failure while show Promise unresolved settles once', async () => {
-		const lifecycle = createInterstitialLifecycle({ id: 'i2', failSafeMs: 50_000 })
+		const lifecycle = createInterstitialLifecycle({
+			id: 'i2',
+			showInitTimeoutMs: 50_000,
+		})
 		lifecycle.markShowing()
 		lifecycle.onFailed()
 		await expect(lifecycle.waitForSettlement()).resolves.toBe('failed')
@@ -44,18 +49,41 @@ describe('interstitial lifecycle callback orders', () => {
 		await expect(lifecycle.waitForSettlement()).resolves.toBe('dismissed')
 	})
 
-	it('fail-safe settles when callbacks never arrive', async () => {
+	it('show-init timeout settles when ad never becomes visible', async () => {
 		const lifecycle = createInterstitialLifecycle({
 			id: 'i4',
-			failSafeMs: INTERSTITIAL_FAILSAFE_MS,
+			showInitTimeoutMs: INTERSTITIAL_SHOW_INIT_TIMEOUT_MS,
 		})
-		lifecycle.markShowing()
-		jest.advanceTimersByTime(INTERSTITIAL_FAILSAFE_MS)
+		lifecycle.markShowRequested()
+		jest.advanceTimersByTime(INTERSTITIAL_SHOW_INIT_TIMEOUT_MS)
 		await expect(lifecycle.waitForSettlement()).resolves.toBe('failed')
 	})
 
-	it('dispose settles cancelled if still open', async () => {
+	it('visible ad is NOT failed by show-init timeout', async () => {
+		const lifecycle = createInterstitialLifecycle({
+			id: 'i4b',
+			showInitTimeoutMs: 5_000,
+		})
+		lifecycle.markShowRequested()
+		lifecycle.onAdShown()
+		jest.advanceTimersByTime(60_000)
+		expect(lifecycle.snapshot().settled).toBe(false)
+		lifecycle.onDismissed()
+		await expect(lifecycle.waitForSettlement()).resolves.toBe('dismissed')
+	})
+
+	it('cancel is terminal; late dismiss is no-op', async () => {
 		const lifecycle = createInterstitialLifecycle({ id: 'i5' })
+		lifecycle.markShowing()
+		lifecycle.cancel()
+		await expect(lifecycle.waitForSettlement()).resolves.toBe('cancelled')
+		lifecycle.onDismissed()
+		lifecycle.onFailed()
+		expect(lifecycle.snapshot().result).toBe('cancelled')
+	})
+
+	it('dispose settles cancelled if still open', async () => {
+		const lifecycle = createInterstitialLifecycle({ id: 'i6' })
 		lifecycle.markShowing()
 		lifecycle.dispose()
 		await expect(lifecycle.waitForSettlement()).resolves.toBe('cancelled')
