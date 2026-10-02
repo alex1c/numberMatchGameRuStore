@@ -35,6 +35,16 @@ export type {
 	RewardedUiPhase,
 } from './rewardedLifecycle'
 export {
+	INTERSTITIAL_FAILSAFE_MS,
+	createInterstitialLifecycle,
+} from './interstitialLifecycle'
+export type {
+	InterstitialLifecycleController,
+	InterstitialLifecycleResult,
+	InterstitialLifecycleSnapshot,
+	InterstitialUiPhase,
+} from './interstitialLifecycle'
+export {
 	initializeAds,
 	preloadInterstitial,
 	preloadRewarded,
