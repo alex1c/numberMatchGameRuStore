@@ -19,7 +19,7 @@ import {
 	useState,
 	type ReactNode,
 } from 'react'
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, AppState, StyleSheet, Text, View } from 'react-native'
 
 import {
 	CAMPAIGN_LEVEL_COUNT,
@@ -235,6 +235,35 @@ export function AppStateProvider({
 			cancelled = true
 		}
 	}, [repository])
+
+	// Re-evaluate local calendar on foreground — discard unfinished stale Daily.
+	useEffect(() => {
+		if (hydrateStatus !== 'ready') {
+			return
+		}
+		const onChange = (state: string) => {
+			if (state !== 'active') {
+				return
+			}
+			const todayKey = localDateKey(new Date())
+			void (async () => {
+				const next = await repository.discardStaleDailyActiveIfDateChanged(
+					todayKey,
+				)
+				setRoot(next)
+				if (
+					sessionSource === 'daily' &&
+					next.daily.activeDaily?.dateKey !== todayKey
+				) {
+					setSessionSource('none')
+				}
+			})()
+		}
+		const sub = AppState.addEventListener('change', onChange)
+		return () => {
+			sub.remove()
+		}
+	}, [hydrateStatus, repository, sessionSource])
 
 	const completeTraining = useCallback(async () => {
 		const next = await repository.setTrainingCompleted(true)
@@ -497,6 +526,16 @@ export function AppStateProvider({
 			if (!active) {
 				return null
 			}
+			// Device-local calendar is authoritative — never complete yesterday.
+			const todayKey = localDateKey(new Date())
+			if (active.dateKey !== todayKey) {
+				const next = await repository.discardStaleDailyActiveIfDateChanged(
+					todayKey,
+				)
+				setRoot(next)
+				setSessionSource('none')
+				return null
+			}
 			completionInFlight.current = true
 			try {
 				const stars = starsFromAttempt({
@@ -529,7 +568,10 @@ export function AppStateProvider({
 	)
 
 	const buildRestoredDailySession = useCallback((): GameSessionState | null => {
-		const active = root.daily.activeDaily
+		// Prefer authoritative hydrated root (not a stale React snapshot).
+		const active = repository.isHydrated()
+			? repository.getRoot().daily.activeDaily
+			: root.daily.activeDaily
 		if (!active) {
 			return null
 		}
@@ -538,7 +580,7 @@ export function AppStateProvider({
 			return null
 		}
 		return { ...state, undoAfterCompletion: false }
-	}, [root.daily.activeDaily])
+	}, [repository, root.daily.activeDaily])
 
 	const getDailySummary = useCallback(
 		(todayKey: LocalDateKey): DailySummary => {
@@ -562,8 +604,15 @@ export function AppStateProvider({
 				todayKey,
 			)
 			setRoot(next)
+			// If we were mid-Daily and day rolled over, clear runtime source.
+			if (
+				sessionSource === 'daily' &&
+				next.daily.activeDaily?.dateKey !== todayKey
+			) {
+				setSessionSource('none')
+			}
 		},
-		[repository],
+		[repository, sessionSource],
 	)
 
 	const setThemePreference = useCallback(
@@ -661,7 +710,9 @@ export function AppStateProvider({
 	}, [])
 
 	const buildRestoredGameSession = useCallback((): GameSessionState | null => {
-		const active = root.activeSession
+		const active = repository.isHydrated()
+			? repository.getRoot().activeSession
+			: root.activeSession
 		if (!active) {
 			return null
 		}
@@ -670,7 +721,7 @@ export function AppStateProvider({
 			return null
 		}
 		return { ...state, undoAfterCompletion: false }
-	}, [root.activeSession])
+	}, [repository, root.activeSession])
 
 	const value = useMemo<AppStateContextValue>(
 		() => ({

@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { useAppState } from '../app'
 import { HubScreenShell } from '../components/HubScreenShell'
@@ -35,13 +35,29 @@ export function DailyHubScreen({ onBack, onOpenGame }: DailyHubScreenProps) {
 	} = useAppState()
 	const { startSession, restoreSession, isDirty } = useGameSession()
 	const [busy, setBusy] = useState(false)
+	// Re-evaluate local calendar date on foreground — never freeze mount-only todayKey.
+	const [todayKey, setTodayKey] = useState(() => localDateKey(new Date()))
 
-	const todayKey = useMemo(() => localDateKey(new Date()), [])
-	const summary = getDailySummary(todayKey)
+	const refreshLocalDate = useCallback(() => {
+		const next = localDateKey(new Date())
+		setTodayKey((prev) => (prev === next ? prev : next))
+		void discardStaleDailyIfDateChanged(next)
+	}, [discardStaleDailyIfDateChanged])
 
 	useEffect(() => {
-		void discardStaleDailyIfDateChanged(todayKey)
-	}, [discardStaleDailyIfDateChanged, todayKey])
+		// Mount: discard stale Daily without cascading setState when already today.
+		void discardStaleDailyIfDateChanged(localDateKey(new Date()))
+		const sub = AppState.addEventListener('change', (state) => {
+			if (state === 'active') {
+				refreshLocalDate()
+			}
+		})
+		return () => {
+			sub.remove()
+		}
+	}, [discardStaleDailyIfDateChanged, refreshLocalDate])
+
+	const summary = getDailySummary(todayKey)
 
 	const recentKeys = useMemo(
 		() => listRecentLocalDateKeys(todayKey, 7),
@@ -74,9 +90,15 @@ export function DailyHubScreen({ onBack, onOpenGame }: DailyHubScreenProps) {
 		setBusy(true)
 		try {
 			if (primaryAction.kind === 'continue') {
+				// Re-evaluate calendar date before restoring yesterday's board.
+				const nowKey = localDateKey(new Date())
+				if (nowKey !== todayKey) {
+					setTodayKey(nowKey)
+				}
+				await discardStaleDailyIfDateChanged(nowKey)
 				const restored = buildRestoredDailySession()
 				if (!restored) {
-					Alert.alert(strings.errorTitle, strings.errorGeneric)
+					// Stale unfinished Daily discarded — hub will show Play for today.
 					return
 				}
 				markDailySession()
@@ -130,6 +152,7 @@ export function DailyHubScreen({ onBack, onOpenGame }: DailyHubScreenProps) {
 	}, [
 		buildRestoredDailySession,
 		busy,
+		discardStaleDailyIfDateChanged,
 		isDirty,
 		markDailySession,
 		onOpenGame,
@@ -138,6 +161,7 @@ export function DailyHubScreen({ onBack, onOpenGame }: DailyHubScreenProps) {
 		sessionSource,
 		startDailyPuzzle,
 		startSession,
+		todayKey,
 	])
 
 	return (

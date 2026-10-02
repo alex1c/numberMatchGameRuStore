@@ -53,8 +53,10 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 		activeSession,
 		startCampaignLevel,
 		sessionSource,
+		buildRestoredGameSession,
+		markCampaignSession,
 	} = useAppState()
-	const { isDirty, startSession, clearSession } = useGameSession()
+	const { isDirty, startSession, clearSession, restoreSession } = useGameSession()
 	const startingRef = useRef(false)
 	const listRef = useRef<FlatListType<number>>(null)
 
@@ -118,6 +120,17 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 		},
 		[],
 	)
+
+	const continueActiveCampaign = useCallback(() => {
+		const restored = buildRestoredGameSession()
+		if (!restored) {
+			Alert.alert(strings.errorTitle, strings.errorGeneric)
+			return
+		}
+		markCampaignSession()
+		restoreSession(restored)
+		onOpenGame()
+	}, [buildRestoredGameSession, markCampaignSession, onOpenGame, restoreSession])
 
 	const launchLevel = useCallback(
 		async (level: number, purpose: 'progression' | 'replay') => {
@@ -184,6 +197,15 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 			if (state === 'locked') {
 				return
 			}
+			// Active in-progress level: CONTINUE existing attempt — never overwrite.
+			if (
+				(state === 'active' || state === 'replay_active') &&
+				activeSession?.level === level &&
+				activeSession.status === 'in_progress'
+			) {
+				continueActiveCampaign()
+				return
+			}
 			if (state === 'completed' || state === 'replay_active') {
 				confirmAndLaunch(level, 'replay')
 				return
@@ -191,7 +213,7 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 			// unlocked or active progression
 			confirmAndLaunch(level, 'progression')
 		},
-		[confirmAndLaunch, resolveState],
+		[activeSession, confirmAndLaunch, continueActiveCampaign, resolveState],
 	)
 
 	const renderItem = useCallback(

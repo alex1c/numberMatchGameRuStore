@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
 	Alert,
+	AppState,
 	Pressable,
 	StyleSheet,
 	Text,
@@ -14,7 +15,7 @@ import {
 } from 'react-native'
 
 import { evaluateAchievementUnlocks, useAppState } from '../app'
-import { formatLocalDateRu } from '../daily'
+import { formatLocalDateRu, localDateKey, type LocalDateKey } from '../daily'
 import {
 	maybeShowInterstitialAtTransition,
 	notifyCampaignLevelCompleted,
@@ -36,10 +37,20 @@ import {
 } from '../game/helpPolicy'
 import { strings } from '../i18n/strings.ru'
 import { GENERATION_VERSION } from '../game/generator'
-import { starsFromAttempt } from '../game/stars'
+import { starsFromAttempt, type StarCount } from '../game/stars'
 import { useGameSession } from '../game/session/GameSessionContext'
 import type { HintOutcome } from '../game/session/hintRequest'
 import { spacing, typography, useTheme } from '../theme'
+
+/** Immutable presentation data captured at Daily completion (survives activeDaily clear). */
+interface DailyCompletionSnapshot {
+	readonly dateKey: LocalDateKey
+	readonly fingerprint: string
+	readonly attemptStars: StarCount
+	readonly usedHint: boolean
+	readonly usedUndo: boolean
+	readonly streakAfter: number
+}
 
 interface GameScreenProps {
 	readonly onHome: () => void
@@ -98,6 +109,8 @@ export function GameScreen({
 		getDailySummary,
 		pushAchievementToasts,
 		recordGameplayStats,
+		discardStaleDailyIfDateChanged,
+		clearSessionSource,
 	} = useAppState()
 
 	const [dismissedCompletionKey, setDismissedCompletionKey] = useState<
@@ -107,6 +120,9 @@ export function GameScreen({
 	const [showDevCoords, setShowDevCoords] = useState(DEV_SHOW_COORDS_DEFAULT)
 	const [nextBusy, setNextBusy] = useState(false)
 	const [helpAdBusy, setHelpAdBusy] = useState(false)
+	/** Survives activeDaily clear so Daily completion overlay keeps mode/stars/streak. */
+	const [dailyCompletionSnapshot, setDailyCompletionSnapshot] =
+		useState<DailyCompletionSnapshot | null>(null)
 	const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const completionCommitted = useRef<string | null>(null)
@@ -139,7 +155,12 @@ export function GameScreen({
 
 	const isCampaign = sessionSource === 'campaign' && activeSession !== null
 	const isDaily = sessionSource === 'daily' && daily.activeDaily !== null
-	const dailyDateKey = daily.activeDaily?.dateKey ?? null
+	/** Completion UI may still be Daily after persisted activeDaily was cleared. */
+	const isDailyCompletion =
+		dailyCompletionSnapshot !== null && session?.completed === true
+	const showingAsDaily = isDaily || isDailyCompletion
+	const dailyDateKey =
+		daily.activeDaily?.dateKey ?? dailyCompletionSnapshot?.dateKey ?? null
 	const campaignLevel = activeSession?.level ?? null
 	const campaignPurpose = activeSession?.purpose ?? null
 	const monetized = isHelpMonetized(sessionSource)
@@ -150,6 +171,40 @@ export function GameScreen({
 				)
 			: undefined
 	const isDensityLab = Boolean(densityMeta)
+
+	// Local-date authority while Daily Game is open — discard stale mid-session.
+	useEffect(() => {
+		if (sessionSource !== 'daily') {
+			return
+		}
+		const revalidate = () => {
+			const today = localDateKey(new Date())
+			const activeDate = daily.activeDaily?.dateKey
+			if (activeDate && activeDate !== today) {
+				void (async () => {
+					await discardStaleDailyIfDateChanged(today)
+					clearSessionSource()
+					setDailyCompletionSnapshot(null)
+					onHome()
+				})()
+			}
+		}
+		revalidate()
+		const sub = AppState.addEventListener('change', (state) => {
+			if (state === 'active') {
+				revalidate()
+			}
+		})
+		return () => {
+			sub.remove()
+		}
+	}, [
+		clearSessionSource,
+		daily.activeDaily?.dateKey,
+		discardStaleDailyIfDateChanged,
+		onHome,
+		sessionSource,
+	])
 
 	useEffect(() => {
 		return () => {
@@ -310,7 +365,11 @@ export function GameScreen({
 				(persisted.usedHint ||
 					persisted.usedUndo ||
 					persisted.freeHintConsumed ||
-					persisted.freeUndoConsumed)
+					persisted.freeUndoConsumed ||
+					persisted.history.length > 0 ||
+					persisted.counters.matchesRemoved > 0 ||
+					persisted.counters.appendActions > 0 ||
+					persisted.counters.undoActions > 0)
 			if (!diskDirty) {
 				lastSyncedKey.current = key
 				return
@@ -358,7 +417,11 @@ export function GameScreen({
 				(persisted.usedHint ||
 					persisted.usedUndo ||
 					persisted.freeHintConsumed ||
-					persisted.freeUndoConsumed)
+					persisted.freeUndoConsumed ||
+					persisted.history.length > 0 ||
+					persisted.counters.matchesRemoved > 0 ||
+					persisted.counters.appendActions > 0 ||
+					persisted.counters.undoActions > 0)
 			if (!diskDirty) {
 				lastSyncedKey.current = key
 				return
@@ -434,21 +497,37 @@ export function GameScreen({
 			return
 		}
 		completionCommitted.current = commitKey
+		// Capture Daily presentation BEFORE persistence clears activeDaily.
+		const attemptStars = starsFromAttempt({
+			usedHint: session.usedHint,
+			usedUndo: session.usedUndo,
+		})
+		const preCommitSnapshot: DailyCompletionSnapshot = {
+			dateKey: dailyDateKey,
+			fingerprint: session.identity.fingerprint,
+			attemptStars,
+			usedHint: session.usedHint,
+			usedUndo: session.usedUndo,
+			streakAfter: getDailySummary(dailyDateKey).activeStreak,
+		}
+		setDailyCompletionSnapshot(preCommitSnapshot)
 		void (async () => {
 			const unlocks = await commitDailyCompletion(session)
+			const streakAfter =
+				unlocks?.dailyStreakAfter ?? preCommitSnapshot.streakAfter
+			setDailyCompletionSnapshot({
+				...preCommitSnapshot,
+				streakAfter,
+			})
 			if (levelCompletedAnalyticsKey.current !== commitKey) {
 				levelCompletedAnalyticsKey.current = commitKey
-				const attemptStars = starsFromAttempt({
-					usedHint: session.usedHint,
-					usedUndo: session.usedUndo,
-				})
 				trackEvent('daily_completed', {
 					dateKey: dailyDateKey,
 					stars: attemptStars,
 					difficulty: session.identity.profile,
 					usedHint: session.usedHint,
 					usedUndo: session.usedUndo,
-					streak: unlocks?.dailyStreakAfter ?? 0,
+					streak: streakAfter,
 				})
 			}
 			if (unlocks && unlocks.newUnlockIds.length > 0) {
@@ -482,13 +561,35 @@ export function GameScreen({
 					appendCount: session.counters.appendActions,
 				})
 			}
+			// Explicit Restart persistence transaction — do not wait for incidental sync.
+			const restarted = {
+				...session,
+				board: session.initialBoard,
+				history: [] as typeof session.history,
+				counters: {
+					matchesRemoved: 0,
+					appendActions: 0,
+					undoActions: 0,
+				},
+				usedHint: false,
+				usedUndo: false,
+				freeHintConsumed: false,
+				freeUndoConsumed: false,
+				completed: false,
+			}
 			dispatch({ type: 'RESTART' })
 			// New attempt — allow level_started again for same fingerprint.
 			levelStartedKey.current = null
 			levelCompletedAnalyticsKey.current = null
 			completionCommitted.current = null
+			setDailyCompletionSnapshot(null)
 			// Force help-flag sync after Restart (free entitlement must clear on disk).
 			lastSyncedKey.current = null
+			if (isCampaign) {
+				void syncSessionFromGameplay(restarted)
+			} else if (isDaily) {
+				void syncDailyFromGameplay(restarted)
+			}
 		}
 		if (!isDirty && session.history.length === 0) {
 			doRestart()
@@ -502,7 +603,16 @@ export function GameScreen({
 				onPress: doRestart,
 			},
 		])
-	}, [campaignLevel, dispatch, isCampaign, isDaily, isDirty, session])
+	}, [
+		campaignLevel,
+		dispatch,
+		isCampaign,
+		isDaily,
+		isDirty,
+		session,
+		syncDailyFromGameplay,
+		syncSessionFromGameplay,
+	])
 
 	const handleAppend = useCallback(() => {
 		const before = sessionLiveRef.current
@@ -855,7 +965,7 @@ export function GameScreen({
 	])
 
 	const handleDailyReplay = useCallback(async () => {
-		if (nextGuard.current || !dailyDateKey) {
+		if (nextGuard.current) {
 			return
 		}
 		nextGuard.current = true
@@ -870,6 +980,7 @@ export function GameScreen({
 			levelCompletedAnalyticsKey.current = null
 			lastSyncedKey.current = null
 			setDismissedCompletionKey(null)
+			setDailyCompletionSnapshot(null)
 			startSession(result.identity, result.board, {
 				undoAfterCompletion: false,
 			})
@@ -877,7 +988,7 @@ export function GameScreen({
 		} finally {
 			nextGuard.current = false
 		}
-	}, [dailyDateKey, onReplaceGame, startDailyPuzzle, startSession])
+	}, [onReplaceGame, startDailyPuzzle, startSession])
 
 	const completionHome = useCallback(() => {
 		if (isDensityLab && onDensityLab) {
@@ -930,11 +1041,11 @@ export function GameScreen({
 		completionKey !== null && completionKey !== dismissedCompletionKey
 
 	const undoAllowedAfterCompletion =
-		session.undoAfterCompletion !== false && !isCampaign && !isDaily
+		session.undoAfterCompletion !== false && !isCampaign && !showingAsDaily
 
 	const headerTitle = isCampaign && campaignLevel
 		? strings.levelHeader(campaignLevel)
-		: isDaily && dailyDateKey
+		: showingAsDaily && dailyDateKey
 			? strings.dailyPuzzleHeader
 			: isDensityLab && densityMeta
 				? densityMeta.label
@@ -942,7 +1053,7 @@ export function GameScreen({
 	// Campaign: level + optional difficulty only — never seed/fingerprint.
 	const headerSubtitle = isCampaign
 		? strings.profileLabel(session.identity.profile)
-		: isDaily && dailyDateKey
+		: showingAsDaily && dailyDateKey
 			? formatLocalDateRu(dailyDateKey)
 			: isDensityLab
 				? session.identity.label
@@ -958,11 +1069,11 @@ export function GameScreen({
 	const completionTitle =
 		isCampaign && campaignLevel
 			? strings.levelCompletedTitle(campaignLevel)
-			: isDaily
+			: showingAsDaily
 				? strings.dailyPuzzleHeader
 				: strings.completedTitle
 
-	const completionMode = isDaily
+	const completionMode = showingAsDaily
 		? 'daily'
 		: !isCampaign
 			? 'dev'
@@ -971,11 +1082,30 @@ export function GameScreen({
 				: 'campaign_progression'
 
 	const dailyStreakNote =
-		isDaily && dailyDateKey
+		showingAsDaily && dailyDateKey
 			? strings.dailyCompletionStreak(
-					getDailySummary(dailyDateKey).activeStreak,
+					dailyCompletionSnapshot?.streakAfter ??
+						getDailySummary(dailyDateKey).activeStreak,
 				)
 			: undefined
+
+	const completionAttemptStars = isCampaign
+		? starsFromAttempt({
+				usedHint: session.usedHint,
+				usedUndo: session.usedUndo,
+			})
+		: showingAsDaily
+			? (dailyCompletionSnapshot?.attemptStars ??
+				starsFromAttempt({
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+				}))
+			: undefined
+
+	const completionUsedHint =
+		dailyCompletionSnapshot?.usedHint ?? session.usedHint
+	const completionUsedUndo =
+		dailyCompletionSnapshot?.usedUndo ?? session.usedUndo
 
 	return (
 		<View
@@ -1064,23 +1194,16 @@ export function GameScreen({
 				body={
 					isCampaign
 						? strings.levelCompletedTitle(campaignLevel ?? 0)
-						: isDaily
+						: showingAsDaily
 							? strings.completedBody
 							: strings.completedBody
 				}
 				counters={session.counters}
 				mode={completionMode}
 				footerNote={dailyStreakNote}
-				attemptStars={
-					isCampaign || isDaily
-						? starsFromAttempt({
-								usedHint: session.usedHint,
-								usedUndo: session.usedUndo,
-							})
-						: undefined
-				}
-				usedHint={session.usedHint}
-				usedUndo={session.usedUndo}
+				attemptStars={completionAttemptStars}
+				usedHint={completionUsedHint}
+				usedUndo={completionUsedUndo}
 				showNext={showNext}
 				nextLabel={
 					campaignLevel === CAMPAIGN_LEVEL_COUNT
@@ -1090,7 +1213,7 @@ export function GameScreen({
 				nextBusy={nextBusy}
 				onNext={showNext ? () => void handleNext() : undefined}
 				onReplay={
-					isDaily
+					showingAsDaily
 						? () => void handleDailyReplay()
 						: isCampaign || isDensityLab
 							? () => void handleReplay()
@@ -1109,7 +1232,7 @@ export function GameScreen({
 					undoAllowedAfterCompletion && session.history.length > 0
 				}
 				onUndo={() => dispatch({ type: 'UNDO' })}
-				showRestart={!isCampaign && !isDensityLab && !isDaily}
+				showRestart={!isCampaign && !isDensityLab && !showingAsDaily}
 				onRestart={confirmRestart}
 			/>
 		</View>

@@ -47,13 +47,15 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 		startCampaignLevel,
 		resetProgress,
 		markDevFixtureSession,
+		markCampaignSession,
 		clearActiveSession,
 		root,
 		getDailySummary,
+		buildRestoredGameSession,
 	} = useAppState()
 	const todayKey = useMemo(() => localDateKey(new Date()), [])
 	const dailySummary = getDailySummary(todayKey)
-	const { hasSession, isDirty, startSession, clearSession, session } =
+	const { hasSession, isDirty, startSession, clearSession, session, restoreSession } =
 		useGameSession()
 	const [busyId, setBusyId] = useState<string | null>(null)
 	const [starting, setStarting] = useState(false)
@@ -121,6 +123,13 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 
 	const handlePrimary = () => {
 		if (primaryCta.kind === 'continue') {
+			// Explicitly restore persisted Campaign into runtime before Game.
+			// Do not rely on whichever session was last mounted (Daily may be live).
+			const restored = buildRestoredGameSession()
+			if (restored) {
+				markCampaignSession()
+				restoreSession(restored)
+			}
 			onNavigate('game')
 			return
 		}
