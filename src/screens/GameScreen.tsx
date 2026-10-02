@@ -15,8 +15,13 @@ import {
 } from 'react-native'
 
 import { evaluateAchievementUnlocks, useAppState } from '../app'
-import { formatLocalDateRu, localDateKey, type LocalDateKey } from '../daily'
 import {
+	currentLocalDateKey,
+	formatLocalDateRu,
+	type LocalDateKey,
+} from '../daily'
+import {
+	cancelActiveInterstitialTransition,
 	maybeShowInterstitialAtTransition,
 	notifyCampaignLevelCompleted,
 	notifyCampaignLevelStarted,
@@ -41,6 +46,17 @@ import { starsFromAttempt, type StarCount } from '../game/stars'
 import { useGameSession } from '../game/session/GameSessionContext'
 import type { HintOutcome } from '../game/session/hintRequest'
 import { spacing, typography, useTheme } from '../theme'
+import {
+	beginTransition,
+	bumpScreenGeneration,
+	cancelActiveTransition,
+	createInitialTransitionGuardState,
+	invalidateScreen,
+	isTransitionAlive,
+	syncAttemptId,
+	type TransitionGuardState,
+} from './gameTransitionGuard'
+import type { TransitionToken } from '../game/session/attemptIdentity'
 
 /** Immutable presentation data captured at Daily completion (survives activeDaily clear). */
 interface DailyCompletionSnapshot {
@@ -93,6 +109,8 @@ export function GameScreen({
 		requestHint,
 		isDirty,
 		startSession,
+		attemptId,
+		getAttemptId,
 	} = useGameSession()
 	const {
 		activeSession,
@@ -142,15 +160,51 @@ export function GameScreen({
 	const statsBaselineKey = useRef<string | null>(null)
 	/** Latest session for rewarded callbacks (avoids stale closures). */
 	const sessionLiveRef = useRef(session)
-
-	useEffect(() => {
-		sessionLiveRef.current = session
-	}, [session])
+	/** Screen + transition guard — invalidated on unmount / Restart / new attempt. */
+	const transitionGuardRef = useRef<TransitionGuardState>(
+		createInitialTransitionGuardState(),
+	)
+	const rewardedAttemptRef = useRef<number | null>(null)
 
 	/** Centralized cleanup for rewarded UI chrome (never leaves Загрузка stuck). */
 	const finalizeRewardedUi = useCallback(() => {
 		setHelpAdBusy(false)
 		rewardedGuard.current = false
+	}, [])
+
+	useEffect(() => {
+		sessionLiveRef.current = session
+	}, [session])
+
+	useEffect(() => {
+		syncAttemptId(transitionGuardRef.current, attemptId)
+		// New attempt invalidates pending Next/Home transitions + interstitial.
+		cancelActiveTransition(transitionGuardRef.current)
+		cancelActiveInterstitialTransition()
+		rewardedAttemptRef.current = null
+		rewardedGuard.current = false
+		// Clear ad chrome asynchronously — avoid sync setState in effect body.
+		const clearBusy = setTimeout(() => {
+			setHelpAdBusy(false)
+		}, 0)
+		return () => {
+			clearTimeout(clearBusy)
+		}
+	}, [attemptId])
+
+	useEffect(() => {
+		const guard = transitionGuardRef.current
+		bumpScreenGeneration(guard)
+		syncAttemptId(guard, getAttemptId())
+		return () => {
+			invalidateScreen(guard)
+			cancelActiveTransition(guard)
+			cancelActiveInterstitialTransition()
+			rewardedAttemptRef.current = null
+			rewardedGuard.current = false
+		}
+		// Mount / unmount only.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [])
 
 	const isCampaign = sessionSource === 'campaign' && activeSession !== null
@@ -172,22 +226,52 @@ export function GameScreen({
 			: undefined
 	const isDensityLab = Boolean(densityMeta)
 
+	/**
+	 * Active Daily expiry contract — device-local calendar is authority.
+	 * Returns false when gameplay must stop (stale day discarded).
+	 */
+	const ensureDailyCurrent = useCallback((): boolean => {
+		if (sessionSource !== 'daily') {
+			return true
+		}
+		const today = currentLocalDateKey()
+		const activeDate = daily.activeDaily?.dateKey
+		if (!activeDate || activeDate === today) {
+			return true
+		}
+		void (async () => {
+			await discardStaleDailyIfDateChanged(today)
+			clearSessionSource()
+			setDailyCompletionSnapshot(null)
+			finalizeRewardedUi()
+			cancelActiveInterstitialTransition()
+			cancelActiveTransition(transitionGuardRef.current)
+			Alert.alert(strings.dailyExpiredTitle, strings.dailyExpiredBody, [
+				{
+					text: strings.dailyExpiredOpenToday,
+					onPress: () => {
+						onHome()
+					},
+				},
+			])
+		})()
+		return false
+	}, [
+		clearSessionSource,
+		daily.activeDaily?.dateKey,
+		discardStaleDailyIfDateChanged,
+		finalizeRewardedUi,
+		onHome,
+		sessionSource,
+	])
+
 	// Local-date authority while Daily Game is open — discard stale mid-session.
 	useEffect(() => {
 		if (sessionSource !== 'daily') {
 			return
 		}
 		const revalidate = () => {
-			const today = localDateKey(new Date())
-			const activeDate = daily.activeDaily?.dateKey
-			if (activeDate && activeDate !== today) {
-				void (async () => {
-					await discardStaleDailyIfDateChanged(today)
-					clearSessionSource()
-					setDailyCompletionSnapshot(null)
-					onHome()
-				})()
-			}
+			ensureDailyCurrent()
 		}
 		revalidate()
 		const sub = AppState.addEventListener('change', (state) => {
@@ -198,13 +282,7 @@ export function GameScreen({
 		return () => {
 			sub.remove()
 		}
-	}, [
-		clearSessionSource,
-		daily.activeDaily?.dateKey,
-		discardStaleDailyIfDateChanged,
-		onHome,
-		sessionSource,
-	])
+	}, [ensureDailyCurrent, sessionSource])
 
 	useEffect(() => {
 		return () => {
@@ -488,6 +566,7 @@ export function GameScreen({
 	])
 
 	// Commit daily completion + analytics + achievement toasts.
+	// Snapshot becomes authoritative ONLY after commit accepts today's date.
 	useEffect(() => {
 		if (!session?.completed || !isDaily || !dailyDateKey) {
 			return
@@ -497,12 +576,11 @@ export function GameScreen({
 			return
 		}
 		completionCommitted.current = commitKey
-		// Capture Daily presentation BEFORE persistence clears activeDaily.
 		const attemptStars = starsFromAttempt({
 			usedHint: session.usedHint,
 			usedUndo: session.usedUndo,
 		})
-		const preCommitSnapshot: DailyCompletionSnapshot = {
+		const candidate: DailyCompletionSnapshot = {
 			dateKey: dailyDateKey,
 			fingerprint: session.identity.fingerprint,
 			attemptStars,
@@ -510,19 +588,43 @@ export function GameScreen({
 			usedUndo: session.usedUndo,
 			streakAfter: getDailySummary(dailyDateKey).activeStreak,
 		}
-		setDailyCompletionSnapshot(preCommitSnapshot)
 		void (async () => {
+			// Re-check calendar immediately before commit (midnight race).
+			const today = currentLocalDateKey()
+			if (candidate.dateKey !== today) {
+				completionCommitted.current = null
+				setDailyCompletionSnapshot(null)
+				await discardStaleDailyIfDateChanged(today)
+				clearSessionSource()
+				Alert.alert(strings.dailyExpiredTitle, strings.dailyExpiredBody, [
+					{
+						text: strings.dailyExpiredOpenToday,
+						onPress: () => {
+							onHome()
+						},
+					},
+				])
+				return
+			}
 			const unlocks = await commitDailyCompletion(session)
-			const streakAfter =
-				unlocks?.dailyStreakAfter ?? preCommitSnapshot.streakAfter
+			if (!unlocks) {
+				// Commit rejected (expiry / no active) — no false success overlay.
+				completionCommitted.current = null
+				setDailyCompletionSnapshot(null)
+				if (!ensureDailyCurrent()) {
+					return
+				}
+				return
+			}
+			const streakAfter = unlocks.dailyStreakAfter ?? candidate.streakAfter
 			setDailyCompletionSnapshot({
-				...preCommitSnapshot,
+				...candidate,
 				streakAfter,
 			})
 			if (levelCompletedAnalyticsKey.current !== commitKey) {
 				levelCompletedAnalyticsKey.current = commitKey
 				trackEvent('daily_completed', {
-					dateKey: dailyDateKey,
+					dateKey: candidate.dateKey,
 					stars: attemptStars,
 					difficulty: session.identity.profile,
 					usedHint: session.usedHint,
@@ -530,15 +632,19 @@ export function GameScreen({
 					streak: streakAfter,
 				})
 			}
-			if (unlocks && unlocks.newUnlockIds.length > 0) {
+			if (unlocks.newUnlockIds.length > 0) {
 				pushAchievementToasts(unlocks.newUnlockIds)
 			}
 		})()
 	}, [
+		clearSessionSource,
 		commitDailyCompletion,
 		dailyDateKey,
+		discardStaleDailyIfDateChanged,
+		ensureDailyCurrent,
 		getDailySummary,
 		isDaily,
+		onHome,
 		pushAchievementToasts,
 		session,
 	])
@@ -553,6 +659,9 @@ export function GameScreen({
 			return
 		}
 		const doRestart = () => {
+			if (!ensureDailyCurrent()) {
+				return
+			}
 			if (isCampaign && campaignLevel !== null) {
 				trackEvent('level_restarted', {
 					level: campaignLevel,
@@ -561,6 +670,11 @@ export function GameScreen({
 					appendCount: session.counters.appendActions,
 				})
 			}
+			// Invalidate pending transitions / interstitial before new attempt.
+			cancelActiveTransition(transitionGuardRef.current)
+			cancelActiveInterstitialTransition()
+			rewardedAttemptRef.current = null
+			finalizeRewardedUi()
 			// Explicit Restart persistence transaction — do not wait for incidental sync.
 			const restarted = {
 				...session,
@@ -606,6 +720,8 @@ export function GameScreen({
 	}, [
 		campaignLevel,
 		dispatch,
+		ensureDailyCurrent,
+		finalizeRewardedUi,
 		isCampaign,
 		isDaily,
 		isDirty,
@@ -615,6 +731,9 @@ export function GameScreen({
 	])
 
 	const handleAppend = useCallback(() => {
+		if (!ensureDailyCurrent()) {
+			return
+		}
 		const before = sessionLiveRef.current
 		dispatch({ type: 'APPEND' })
 		setScrollToEndToken((n) => n + 1)
@@ -627,22 +746,31 @@ export function GameScreen({
 				appendCount: before.counters.appendActions + 1,
 			})
 		}
-	}, [campaignLevel, dispatch, isCampaign])
+	}, [campaignLevel, dispatch, ensureDailyCurrent, isCampaign])
 
 	const handleCellPress = useCallback(
 		(index: number) => {
+			if (!ensureDailyCurrent()) {
+				return
+			}
 			dispatch({ type: 'SELECT_CELL', index })
 		},
-		[dispatch],
+		[dispatch, ensureDailyCurrent],
 	)
 
 	const runHintWithSource = useCallback(
 		async (source: HelpSource) => {
+			if (!ensureDailyCurrent()) {
+				return
+			}
+			const hintAttempt = getAttemptId()
 			const outcome = await requestHint()
+			if (getAttemptId() !== hintAttempt) {
+				return
+			}
 			if (!outcome || !outcome.delivered) {
 				return
 			}
-			// Delivered Hint (free or rewarded) counts toward lifetime statistics.
 			if (isCampaign || isDaily) {
 				void recordGameplayStats({ hints: 1 })
 			}
@@ -656,6 +784,8 @@ export function GameScreen({
 		},
 		[
 			campaignLevel,
+			ensureDailyCurrent,
+			getAttemptId,
 			isCampaign,
 			isDaily,
 			recordGameplayStats,
@@ -665,6 +795,9 @@ export function GameScreen({
 
 	const handleHint = useCallback(() => {
 		if (!session || session.completed || helpAdBusy || rewardedGuard.current) {
+			return
+		}
+		if (!ensureDailyCurrent()) {
 			return
 		}
 		const decision = decideHelpEntitlement(
@@ -693,7 +826,9 @@ export function GameScreen({
 					}
 					rewardedGuard.current = true
 					setHelpAdBusy(true)
-					const requestToken = `${session.identity.fingerprint}:${campaignLevel}`
+					const captureAttempt = getAttemptId()
+					rewardedAttemptRef.current = captureAttempt
+					const requestToken = `attempt:${captureAttempt}:hint`
 					void (async () => {
 						try {
 							const result = await requestRewarded({
@@ -701,25 +836,34 @@ export function GameScreen({
 								sessionToken: requestToken,
 								level: campaignLevel ?? undefined,
 								onSnapshot: (snap) => {
-									// Ad chrome only — never OR into Hint Ищу… busy.
+									if (getAttemptId() !== captureAttempt) {
+										setHelpAdBusy(false)
+										return
+									}
 									setHelpAdBusy(snap.adBusy)
 								},
 								isSessionValid: () => {
+									if (getAttemptId() !== captureAttempt) {
+										return false
+									}
 									const live = sessionLiveRef.current
 									if (!live || live.completed) {
 										return false
 									}
-									return (
-										`${live.identity.fingerprint}:${campaignLevel}` ===
-										requestToken
-									)
+									return rewardedAttemptRef.current === captureAttempt
 								},
 								onGrant: () => {
-									// Reward earned → clear ad chrome, then compute Hint.
+									if (getAttemptId() !== captureAttempt) {
+										return
+									}
 									setHelpAdBusy(false)
 									void runHintWithSource('rewarded')
 								},
 							})
+							if (getAttemptId() !== captureAttempt) {
+								finalizeRewardedUi()
+								return
+							}
 							if (
 								result === 'unavailable' ||
 								result === 'busy' ||
@@ -728,7 +872,12 @@ export function GameScreen({
 								Alert.alert(strings.errorTitle, strings.adUnavailable)
 							}
 						} finally {
-							finalizeRewardedUi()
+							if (getAttemptId() === captureAttempt) {
+								finalizeRewardedUi()
+							} else {
+								setHelpAdBusy(false)
+								rewardedGuard.current = false
+							}
 						}
 					})()
 				},
@@ -736,7 +885,9 @@ export function GameScreen({
 		])
 	}, [
 		campaignLevel,
+		ensureDailyCurrent,
 		finalizeRewardedUi,
+		getAttemptId,
 		helpAdBusy,
 		monetized,
 		runHintWithSource,
@@ -745,6 +896,9 @@ export function GameScreen({
 
 	const handleUndo = useCallback(() => {
 		if (!session || session.completed || helpAdBusy || rewardedGuard.current) {
+			return
+		}
+		if (!ensureDailyCurrent()) {
 			return
 		}
 		const decision = decideHelpEntitlement(
@@ -783,7 +937,9 @@ export function GameScreen({
 					}
 					rewardedGuard.current = true
 					setHelpAdBusy(true)
-					const requestToken = `${session.identity.fingerprint}:${campaignLevel}`
+					const captureAttempt = getAttemptId()
+					rewardedAttemptRef.current = captureAttempt
+					const requestToken = `attempt:${captureAttempt}:undo`
 					void (async () => {
 						try {
 							const result = await requestRewarded({
@@ -791,9 +947,16 @@ export function GameScreen({
 								sessionToken: requestToken,
 								level: campaignLevel ?? undefined,
 								onSnapshot: (snap) => {
+									if (getAttemptId() !== captureAttempt) {
+										setHelpAdBusy(false)
+										return
+									}
 									setHelpAdBusy(snap.adBusy)
 								},
 								isSessionValid: () => {
+									if (getAttemptId() !== captureAttempt) {
+										return false
+									}
 									const live = sessionLiveRef.current
 									if (!live || live.completed) {
 										return false
@@ -801,12 +964,12 @@ export function GameScreen({
 									if (live.history.length === 0) {
 										return false
 									}
-									return (
-										`${live.identity.fingerprint}:${campaignLevel}` ===
-										requestToken
-									)
+									return rewardedAttemptRef.current === captureAttempt
 								},
 								onGrant: () => {
+									if (getAttemptId() !== captureAttempt) {
+										return
+									}
 									setHelpAdBusy(false)
 									const live = sessionLiveRef.current
 									if (!live || live.history.length === 0) {
@@ -821,6 +984,10 @@ export function GameScreen({
 									}
 								},
 							})
+							if (getAttemptId() !== captureAttempt) {
+								finalizeRewardedUi()
+								return
+							}
 							if (
 								result === 'unavailable' ||
 								result === 'busy' ||
@@ -829,7 +996,12 @@ export function GameScreen({
 								Alert.alert(strings.errorTitle, strings.adUnavailable)
 							}
 						} finally {
-							finalizeRewardedUi()
+							if (getAttemptId() === captureAttempt) {
+								finalizeRewardedUi()
+							} else {
+								setHelpAdBusy(false)
+								rewardedGuard.current = false
+							}
 						}
 					})()
 				},
@@ -838,7 +1010,9 @@ export function GameScreen({
 	}, [
 		campaignLevel,
 		dispatch,
+		ensureDailyCurrent,
 		finalizeRewardedUi,
+		getAttemptId,
 		helpAdBusy,
 		isCampaign,
 		monetized,
@@ -847,15 +1021,24 @@ export function GameScreen({
 
 	/**
 	 * After completion overlay CTA: optionally show interstitial, then navigate.
-	 * Navigation runs exactly once whether the ad shows, fails, or is ineligible.
+	 * Token-checked at every await boundary — stale Next/Home never mutates.
 	 */
 	const withOptionalInterstitial = useCallback(
-		async (navigate: () => void | Promise<void>) => {
+		async (
+			token: TransitionToken,
+			navigate: () => void | Promise<void>,
+		) => {
 			if (isCampaign && !isDensityLab) {
 				await maybeShowInterstitialAtTransition({
 					isTraining: false,
 					naturalBoundary: true,
+					isStillCurrent: () =>
+						isTransitionAlive(transitionGuardRef.current, token),
 				})
+			}
+			if (!isTransitionAlive(transitionGuardRef.current, token)) {
+				cancelActiveInterstitialTransition()
+				return
 			}
 			await navigate()
 		},
@@ -868,16 +1051,29 @@ export function GameScreen({
 		}
 		nextGuard.current = true
 		setNextBusy(true)
+		syncAttemptId(transitionGuardRef.current, getAttemptId())
+		const token = beginTransition(transitionGuardRef.current)
 		try {
-			await withOptionalInterstitial(async () => {
-				// Ensure progression commit finished before unlocking N+1 (idempotent).
+			await withOptionalInterstitial(token, async () => {
+				if (!isTransitionAlive(transitionGuardRef.current, token)) {
+					return
+				}
 				await commitProgressionCompletion(campaignLevel, session)
+				if (!isTransitionAlive(transitionGuardRef.current, token)) {
+					return
+				}
 				const nextLevel = campaignLevel + 1
 				if (nextLevel > CAMPAIGN_LEVEL_COUNT) {
+					if (!isTransitionAlive(transitionGuardRef.current, token)) {
+						return
+					}
 					onHome()
 					return
 				}
 				const result = await startCampaignLevel(nextLevel, 'progression')
+				if (!isTransitionAlive(transitionGuardRef.current, token)) {
+					return
+				}
 				if (!result.ok || !result.identity || !result.board) {
 					Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
 					return
@@ -893,12 +1089,16 @@ export function GameScreen({
 				onReplaceGame?.()
 			})
 		} finally {
+			if (isTransitionAlive(transitionGuardRef.current, token)) {
+				cancelActiveTransition(transitionGuardRef.current)
+			}
 			setNextBusy(false)
 			nextGuard.current = false
 		}
 	}, [
 		campaignLevel,
 		commitProgressionCompletion,
+		getAttemptId,
 		nextBusy,
 		onHome,
 		onReplaceGame,
@@ -920,6 +1120,8 @@ export function GameScreen({
 					Alert.alert(strings.errorTitle, loaded.error)
 					return
 				}
+				cancelActiveTransition(transitionGuardRef.current)
+				cancelActiveInterstitialTransition()
 				completionCommitted.current = null
 				lastSyncedKey.current = null
 				setDismissedCompletionKey(null)
@@ -934,9 +1136,17 @@ export function GameScreen({
 			return
 		}
 		nextGuard.current = true
+		syncAttemptId(transitionGuardRef.current, getAttemptId())
+		const token = beginTransition(transitionGuardRef.current)
 		try {
-			await withOptionalInterstitial(async () => {
+			await withOptionalInterstitial(token, async () => {
+				if (!isTransitionAlive(transitionGuardRef.current, token)) {
+					return
+				}
 				const result = await startCampaignLevel(campaignLevel, 'replay')
+				if (!isTransitionAlive(transitionGuardRef.current, token)) {
+					return
+				}
 				if (!result.ok || !result.identity || !result.board) {
 					Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
 					return
@@ -952,11 +1162,15 @@ export function GameScreen({
 				onReplaceGame?.()
 			})
 		} finally {
+			if (isTransitionAlive(transitionGuardRef.current, token)) {
+				cancelActiveTransition(transitionGuardRef.current)
+			}
 			nextGuard.current = false
 		}
 	}, [
 		campaignLevel,
 		densityMeta,
+		getAttemptId,
 		isDensityLab,
 		onReplaceGame,
 		startCampaignLevel,
@@ -968,8 +1182,13 @@ export function GameScreen({
 		if (nextGuard.current) {
 			return
 		}
+		if (!ensureDailyCurrent()) {
+			return
+		}
 		nextGuard.current = true
 		try {
+			cancelActiveTransition(transitionGuardRef.current)
+			cancelActiveInterstitialTransition()
 			const result = await startDailyPuzzle()
 			if (!result.ok || !result.identity || !result.board) {
 				Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
@@ -988,7 +1207,7 @@ export function GameScreen({
 		} finally {
 			nextGuard.current = false
 		}
-	}, [onReplaceGame, startDailyPuzzle, startSession])
+	}, [ensureDailyCurrent, onReplaceGame, startDailyPuzzle, startSession])
 
 	const completionHome = useCallback(() => {
 		if (isDensityLab && onDensityLab) {
@@ -996,13 +1215,23 @@ export function GameScreen({
 			return
 		}
 		if (session?.completed && isCampaign) {
-			void withOptionalInterstitial(async () => {
+			syncAttemptId(transitionGuardRef.current, getAttemptId())
+			const token = beginTransition(transitionGuardRef.current)
+			void withOptionalInterstitial(token, async () => {
+				if (!isTransitionAlive(transitionGuardRef.current, token)) {
+					return
+				}
 				onHome()
+			}).finally(() => {
+				if (isTransitionAlive(transitionGuardRef.current, token)) {
+					cancelActiveTransition(transitionGuardRef.current)
+				}
 			})
 			return
 		}
 		onHome()
 	}, [
+		getAttemptId,
 		isCampaign,
 		isDensityLab,
 		onDensityLab,

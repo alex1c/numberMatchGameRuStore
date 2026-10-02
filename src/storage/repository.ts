@@ -15,7 +15,8 @@ import {
 	withBestStars,
 	type StarCount,
 } from '../game/stars'
-import { localDateKey, type LocalDateKey } from '../daily/date'
+import { type LocalDateKey } from '../daily/date'
+import { currentLocalDateKey } from '../daily/clock'
 import { recordDailyCompletion } from '../daily/streak'
 import type {
 	PersistedDailyActiveSession,
@@ -197,7 +198,7 @@ export class PersistRepository {
 
 		root = this.discardStaleDailyActiveInMemory(
 			root,
-			localDateKey(new Date()),
+			currentLocalDateKey(),
 		)
 
 		return root

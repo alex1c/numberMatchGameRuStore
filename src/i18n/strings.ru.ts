@@ -142,6 +142,9 @@ export const strings = {
 	dailyCardContinue: 'Продолжить сегодняшнюю',
 	dailyCompletionStreak: (days: number) =>
 		`Серия: ${days} ${pluralDays(days)}`,
+	dailyExpiredTitle: 'Головоломка дня обновилась',
+	dailyExpiredBody: 'Этот день уже закончился. Откройте сегодняшнюю головоломку.',
+	dailyExpiredOpenToday: 'Открыть сегодняшнюю',
 	statisticsTitle: 'Статистика',
 	statsGroupCampaign: 'Кампания',
 	statsGroupGameplay: 'Игра',

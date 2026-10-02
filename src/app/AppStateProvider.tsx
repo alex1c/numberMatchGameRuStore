@@ -46,7 +46,7 @@ import {
 	createDailyPuzzle,
 	getActiveCurrentStreak,
 	isDailyCompletedOn,
-	localDateKey,
+	currentLocalDateKey,
 	type LocalDateKey,
 } from '../daily'
 import type { PersistedDailyState } from '../daily/types'
@@ -199,7 +199,7 @@ export function AppStateProvider({
 				if (cancelled) {
 					return
 				}
-				const todayKey = localDateKey(new Date())
+				const todayKey = currentLocalDateKey()
 				const afterStale = await repository.discardStaleDailyActiveIfDateChanged(
 					todayKey,
 				)
@@ -245,7 +245,7 @@ export function AppStateProvider({
 			if (state !== 'active') {
 				return
 			}
-			const todayKey = localDateKey(new Date())
+			const todayKey = currentLocalDateKey()
 			void (async () => {
 				const next = await repository.discardStaleDailyActiveIfDateChanged(
 					todayKey,
@@ -425,7 +425,7 @@ export function AppStateProvider({
 	)
 
 	const startDailyPuzzle = useCallback(async (): Promise<StartDailyPuzzleResult> => {
-		const todayKey = localDateKey(new Date())
+		const todayKey = currentLocalDateKey()
 		await repository.discardStaleDailyActiveIfDateChanged(todayKey)
 		const generated = createDailyPuzzle(todayKey)
 		if (!generated.ok) {
@@ -527,7 +527,7 @@ export function AppStateProvider({
 				return null
 			}
 			// Device-local calendar is authoritative — never complete yesterday.
-			const todayKey = localDateKey(new Date())
+			const todayKey = currentLocalDateKey()
 			if (active.dateKey !== todayKey) {
 				const next = await repository.discardStaleDailyActiveIfDateChanged(
 					todayKey,

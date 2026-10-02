@@ -11,7 +11,7 @@ import { StarsRow } from '../components/game/StarsRow'
 import {
 	formatLocalDateRu,
 	listRecentLocalDateKeys,
-	localDateKey,
+	currentLocalDateKey,
 } from '../daily'
 import { useGameSession } from '../game/session/GameSessionContext'
 import { strings } from '../i18n/strings.ru'
@@ -36,17 +36,17 @@ export function DailyHubScreen({ onBack, onOpenGame }: DailyHubScreenProps) {
 	const { startSession, restoreSession, isDirty } = useGameSession()
 	const [busy, setBusy] = useState(false)
 	// Re-evaluate local calendar date on foreground — never freeze mount-only todayKey.
-	const [todayKey, setTodayKey] = useState(() => localDateKey(new Date()))
+	const [todayKey, setTodayKey] = useState(() => currentLocalDateKey())
 
 	const refreshLocalDate = useCallback(() => {
-		const next = localDateKey(new Date())
+		const next = currentLocalDateKey()
 		setTodayKey((prev) => (prev === next ? prev : next))
 		void discardStaleDailyIfDateChanged(next)
 	}, [discardStaleDailyIfDateChanged])
 
 	useEffect(() => {
 		// Mount: discard stale Daily without cascading setState when already today.
-		void discardStaleDailyIfDateChanged(localDateKey(new Date()))
+		void discardStaleDailyIfDateChanged(currentLocalDateKey())
 		const sub = AppState.addEventListener('change', (state) => {
 			if (state === 'active') {
 				refreshLocalDate()
@@ -91,7 +91,7 @@ export function DailyHubScreen({ onBack, onOpenGame }: DailyHubScreenProps) {
 		try {
 			if (primaryAction.kind === 'continue') {
 				// Re-evaluate calendar date before restoring yesterday's board.
-				const nowKey = localDateKey(new Date())
+				const nowKey = currentLocalDateKey()
 				if (nowKey !== todayKey) {
 					setTodayKey(nowKey)
 				}
