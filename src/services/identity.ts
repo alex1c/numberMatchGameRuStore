@@ -3,7 +3,7 @@
  */
 
 export const APP_IDENTITY = {
-	displayName: 'Number Match',
+	displayName: 'Пары чисел',
 	packageId: 'com.calculatorplatform.numbermatch',
 	scheme: 'number-match',
 	devtoolsVersion: '1.1.1',

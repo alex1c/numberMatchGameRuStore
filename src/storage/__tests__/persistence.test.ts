@@ -62,10 +62,11 @@ describe('serialize / validate', () => {
 		expect(result.ok).toBe(false)
 	})
 
-	it('accepts a valid default-shaped root (schema v2)', () => {
+	it('accepts a valid default-shaped root (schema v3)', () => {
 		const root = createDefaultRoot()
 		expect(root.schemaVersion).toBe(PERSIST_SCHEMA_VERSION)
 		expect(root.bestStars).toHaveLength(1000)
+		expect(root.daily.history).toEqual([])
 		const result = validatePersistedRoot(root)
 		expect(result.ok).toBe(true)
 	})
@@ -73,7 +74,7 @@ describe('serialize / validate', () => {
 
 describe('migrateToCurrent', () => {
 	it('returns defaults for null / empty', () => {
-		expect(migrateToCurrent(null).schemaVersion).toBe(2)
+		expect(migrateToCurrent(null).schemaVersion).toBe(PERSIST_SCHEMA_VERSION)
 		expect(migrateToCurrent('').highestCompletedLevel).toBe(0)
 	})
 
@@ -91,7 +92,7 @@ describe('migrateToCurrent', () => {
 		expect(migrated.trainingCompleted).toBe(false)
 	})
 
-	it('schema v1 → v2 preserves training and resets campaign/stars', () => {
+	it('schema v1 → v3 preserves training and resets campaign/stars', () => {
 		const raw = JSON.stringify({
 			schemaVersion: 1,
 			campaignVersion: 1,
@@ -101,7 +102,7 @@ describe('migrateToCurrent', () => {
 			activeSession: { mode: 'campaign' },
 		})
 		const migrated = migrateToCurrent(raw)
-		expect(migrated.schemaVersion).toBe(2)
+		expect(migrated.schemaVersion).toBe(PERSIST_SCHEMA_VERSION)
 		expect(migrated.campaignVersion).toBe(2)
 		expect(migrated.trainingCompleted).toBe(true)
 		expect(migrated.highestCompletedLevel).toBe(0)
@@ -109,24 +110,24 @@ describe('migrateToCurrent', () => {
 		expect(totalStars(migrated.bestStars)).toBe(0)
 	})
 
-	it('keeps a valid v2 document', () => {
+	it('migrates a valid v2 document to v3', () => {
 		const root = {
-			...createDefaultRoot(),
+			schemaVersion: 2 as const,
+			campaignVersion: 2 as const,
 			revision: 4,
-			highestCompletedLevel: 12,
 			trainingCompleted: true,
-		}
-		// Repair stars for frontier so validation invariant holds.
-		const withStars = {
-			...root,
-			bestStars: root.bestStars.map((s, i) =>
+			highestCompletedLevel: 12,
+			bestStars: createDefaultRoot().bestStars.map((s, i) =>
 				i < 12 ? (s < 1 ? 1 : s) : s,
 			),
+			activeSession: null,
 		}
-		const migrated = migrateToCurrent(JSON.stringify(withStars))
+		const migrated = migrateToCurrent(JSON.stringify(root))
+		expect(migrated.schemaVersion).toBe(PERSIST_SCHEMA_VERSION)
 		expect(migrated.revision).toBe(4)
 		expect(migrated.highestCompletedLevel).toBe(12)
 		expect(migrated.trainingCompleted).toBe(true)
+		expect(migrated.settings.themePreference).toBe('system')
 	})
 })
 

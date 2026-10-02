@@ -106,7 +106,9 @@ describe('banner placements', () => {
 		expect(resolveBannerPlacement('about')).toBe('secondary')
 		expect(resolveBannerPlacement('training')).toBeNull()
 		expect(resolveBannerPlacement('densityLab')).toBeNull()
-		expect(resolveBannerPlacement('daily')).toBeNull()
+		expect(resolveBannerPlacement('daily')).toBe('home_levels')
+		expect(resolveBannerPlacement('statistics')).toBe('secondary')
+		expect(resolveBannerPlacement('achievements')).toBe('secondary')
 	})
 })
 

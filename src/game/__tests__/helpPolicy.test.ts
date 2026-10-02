@@ -33,8 +33,9 @@ function pairBoard() {
 }
 
 describe('isHelpMonetized', () => {
-	it('monetizes campaign only', () => {
+	it('monetizes campaign and daily', () => {
 		expect(isHelpMonetized('campaign')).toBe(true)
+		expect(isHelpMonetized('daily')).toBe(true)
 		expect(isHelpMonetized('dev_fixture')).toBe(false)
 		expect(isHelpMonetized('none')).toBe(false)
 		expect(isHelpMonetized(null)).toBe(false)

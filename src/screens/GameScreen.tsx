@@ -13,7 +13,8 @@ import {
 	View,
 } from 'react-native'
 
-import { useAppState } from '../app'
+import { evaluateAchievementUnlocks, useAppState } from '../app'
+import { formatLocalDateRu } from '../daily'
 import {
 	maybeShowInterstitialAtTransition,
 	notifyCampaignLevelCompleted,
@@ -83,12 +84,19 @@ export function GameScreen({
 	} = useGameSession()
 	const {
 		activeSession,
+		daily,
 		sessionSource,
 		bestStars,
 		syncSessionFromGameplay,
+		syncDailyFromGameplay,
 		commitProgressionCompletion,
 		commitReplayCompletion,
+		commitDailyCompletion,
 		startCampaignLevel,
+		startDailyPuzzle,
+		getDailySummary,
+		pushAchievementToasts,
+		recordGameplayStats,
 	} = useAppState()
 
 	const [dismissedCompletionKey, setDismissedCompletionKey] = useState<
@@ -106,6 +114,15 @@ export function GameScreen({
 	const lastSyncedKey = useRef<string | null>(null)
 	const nextGuard = useRef(false)
 	const rewardedGuard = useRef(false)
+	/** Track counter deltas so lifetime statistics increment once per action. */
+	const lastStatsCounters = useRef({
+		matches: 0,
+		appends: 0,
+		undos: 0,
+		hints: 0,
+	})
+	/** Fingerprint whose counters already seeded the stats baseline (no double-count). */
+	const statsBaselineKey = useRef<string | null>(null)
 	/** Latest session for rewarded callbacks (avoids stale closures). */
 	const sessionLiveRef = useRef(session)
 
@@ -120,6 +137,8 @@ export function GameScreen({
 	}, [])
 
 	const isCampaign = sessionSource === 'campaign' && activeSession !== null
+	const isDaily = sessionSource === 'daily' && daily.activeDaily !== null
+	const dailyDateKey = daily.activeDaily?.dateKey ?? null
 	const campaignLevel = activeSession?.level ?? null
 	const campaignPurpose = activeSession?.purpose ?? null
 	const monetized = isHelpMonetized(sessionSource)
@@ -189,6 +208,65 @@ export function GameScreen({
 		})
 	}, [campaignLevel, campaignPurpose, isCampaign, session])
 
+	// Daily puzzle_started analytics (once per attempt).
+	useEffect(() => {
+		if (!session || !isDaily || !dailyDateKey) {
+			return
+		}
+		const key = `daily:${dailyDateKey}:${session.identity.fingerprint}`
+		if (levelStartedKey.current === key) {
+			return
+		}
+		levelStartedKey.current = key
+		trackEvent('daily_started', {
+			dateKey: dailyDateKey,
+			difficulty: session.identity.profile,
+		})
+	}, [dailyDateKey, isDaily, session])
+
+	// Lifetime statistics — pairs / appends / undos from counter deltas.
+	// Bootstrap + counter regression (Restart / restore) set baseline without counting.
+	useEffect(() => {
+		if (!session || (!isCampaign && !isDaily)) {
+			return
+		}
+		const prev = lastStatsCounters.current
+		const regress =
+			session.counters.matchesRemoved < prev.matches ||
+			session.counters.appendActions < prev.appends ||
+			session.counters.undoActions < prev.undos
+		const needsBootstrap =
+			statsBaselineKey.current !== session.identity.fingerprint
+
+		if (needsBootstrap || regress) {
+			statsBaselineKey.current = session.identity.fingerprint
+			lastStatsCounters.current = {
+				matches: session.counters.matchesRemoved,
+				appends: session.counters.appendActions,
+				undos: session.counters.undoActions,
+				hints: 0,
+			}
+			return
+		}
+
+		const pairs = Math.max(0, session.counters.matchesRemoved - prev.matches)
+		const appends = Math.max(0, session.counters.appendActions - prev.appends)
+		const undos = Math.max(0, session.counters.undoActions - prev.undos)
+		lastStatsCounters.current = {
+			matches: session.counters.matchesRemoved,
+			appends: session.counters.appendActions,
+			undos: session.counters.undoActions,
+			hints: prev.hints,
+		}
+		if (pairs > 0 || appends > 0 || undos > 0) {
+			void recordGameplayStats({
+				pairs: pairs > 0 ? pairs : undefined,
+				appends: appends > 0 ? appends : undefined,
+				undos: undos > 0 ? undos : undefined,
+			})
+		}
+	}, [isCampaign, isDaily, recordGameplayStats, session])
+
 	// Sync meaningful gameplay to persistence (not SELECT_CELL-only).
 	useEffect(() => {
 		if (!session || !isCampaign) {
@@ -241,7 +319,55 @@ export function GameScreen({
 		void syncSessionFromGameplay(session)
 	}, [activeSession, isCampaign, session, syncSessionFromGameplay])
 
-	// Commit campaign completion once (idempotent) + analytics + interstitial count.
+	// Sync daily gameplay to persistence (include help entitlement bits).
+	useEffect(() => {
+		if (!session || !isDaily) {
+			return
+		}
+		const key = [
+			session.board.nextCellSeq,
+			session.board.cells.filter((c) => c.removed).length,
+			session.history.length,
+			session.counters.matchesRemoved,
+			session.counters.appendActions,
+			session.counters.undoActions,
+			session.completed ? '1' : '0',
+			session.usedHint ? '1' : '0',
+			session.usedUndo ? '1' : '0',
+			session.freeHintConsumed ? '1' : '0',
+			session.freeUndoConsumed ? '1' : '0',
+		].join(':')
+		if (key === lastSyncedKey.current) {
+			return
+		}
+		const boardPristine =
+			session.history.length === 0 &&
+			session.counters.matchesRemoved === 0 &&
+			session.counters.appendActions === 0 &&
+			!session.completed
+		const helpPristine =
+			!session.usedHint &&
+			!session.usedUndo &&
+			!session.freeHintConsumed &&
+			!session.freeUndoConsumed
+		if (boardPristine && helpPristine) {
+			const persisted = daily.activeDaily
+			const diskDirty =
+				persisted != null &&
+				(persisted.usedHint ||
+					persisted.usedUndo ||
+					persisted.freeHintConsumed ||
+					persisted.freeUndoConsumed)
+			if (!diskDirty) {
+				lastSyncedKey.current = key
+				return
+			}
+		}
+		lastSyncedKey.current = key
+		void syncDailyFromGameplay(session)
+	}, [daily.activeDaily, isDaily, session, syncDailyFromGameplay])
+
+	// Commit campaign completion once (idempotent) + analytics + achievements toast queue.
 	useEffect(() => {
 		if (!session?.completed || !isCampaign || !campaignLevel) {
 			return
@@ -251,33 +377,41 @@ export function GameScreen({
 			return
 		}
 		completionCommitted.current = commitKey
-		if (campaignPurpose === 'progression') {
-			void commitProgressionCompletion(campaignLevel, session)
-		} else if (campaignPurpose === 'replay') {
-			void commitReplayCompletion(campaignLevel, session)
-		}
-
-		if (levelCompletedAnalyticsKey.current !== commitKey) {
-			levelCompletedAnalyticsKey.current = commitKey
-			notifyCampaignLevelCompleted()
-			const attemptStars = starsFromAttempt({
-				usedHint: session.usedHint,
-				usedUndo: session.usedUndo,
-			})
-			const best = bestStars[campaignLevel - 1] ?? 0
-			trackEvent('level_completed', {
-				level: campaignLevel,
-				difficulty: session.identity.profile,
-				initialRows: boardRowCount(session.initialBoard.cells.length),
-				starsEarnedThisAttempt: attemptStars,
-				bestStars: Math.max(best, attemptStars),
-				usedHint: session.usedHint,
-				usedUndo: session.usedUndo,
-				appendCount: session.counters.appendActions,
-				campaignVersion: CAMPAIGN_VERSION,
-				generationVersion: GENERATION_VERSION,
-			})
-		}
+		void (async () => {
+			let next = null
+			if (campaignPurpose === 'progression') {
+				next = await commitProgressionCompletion(campaignLevel, session)
+			} else if (campaignPurpose === 'replay') {
+				next = await commitReplayCompletion(campaignLevel, session)
+			}
+			if (next) {
+				const unlocks = evaluateAchievementUnlocks(next)
+				if (unlocks.newUnlockIds.length > 0) {
+					pushAchievementToasts(unlocks.newUnlockIds)
+				}
+			}
+			if (levelCompletedAnalyticsKey.current !== commitKey) {
+				levelCompletedAnalyticsKey.current = commitKey
+				notifyCampaignLevelCompleted()
+				const attemptStars = starsFromAttempt({
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+				})
+				const best = bestStars[campaignLevel - 1] ?? 0
+				trackEvent('level_completed', {
+					level: campaignLevel,
+					difficulty: session.identity.profile,
+					initialRows: boardRowCount(session.initialBoard.cells.length),
+					starsEarnedThisAttempt: attemptStars,
+					bestStars: Math.max(best, attemptStars),
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+					appendCount: session.counters.appendActions,
+					campaignVersion: CAMPAIGN_VERSION,
+					generationVersion: GENERATION_VERSION,
+				})
+			}
+		})()
 	}, [
 		bestStars,
 		campaignLevel,
@@ -285,6 +419,47 @@ export function GameScreen({
 		commitProgressionCompletion,
 		commitReplayCompletion,
 		isCampaign,
+		pushAchievementToasts,
+		session,
+	])
+
+	// Commit daily completion + analytics + achievement toasts.
+	useEffect(() => {
+		if (!session?.completed || !isDaily || !dailyDateKey) {
+			return
+		}
+		const commitKey = `daily:${dailyDateKey}:${session.identity.fingerprint}`
+		if (completionCommitted.current === commitKey) {
+			return
+		}
+		completionCommitted.current = commitKey
+		void (async () => {
+			const unlocks = await commitDailyCompletion(session)
+			if (levelCompletedAnalyticsKey.current !== commitKey) {
+				levelCompletedAnalyticsKey.current = commitKey
+				const attemptStars = starsFromAttempt({
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+				})
+				trackEvent('daily_completed', {
+					dateKey: dailyDateKey,
+					stars: attemptStars,
+					difficulty: session.identity.profile,
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+					streak: unlocks?.dailyStreakAfter ?? 0,
+				})
+			}
+			if (unlocks && unlocks.newUnlockIds.length > 0) {
+				pushAchievementToasts(unlocks.newUnlockIds)
+			}
+		})()
+	}, [
+		commitDailyCompletion,
+		dailyDateKey,
+		getDailySummary,
+		isDaily,
+		pushAchievementToasts,
 		session,
 	])
 
@@ -294,7 +469,7 @@ export function GameScreen({
 		}
 		// After campaign completion — no restart-loss warning; restart still allowed
 		// from menu only while in_progress. Overlay hides restart for campaign done.
-		if (session.completed && isCampaign) {
+		if (session.completed && (isCampaign || isDaily)) {
 			return
 		}
 		const doRestart = () => {
@@ -326,7 +501,7 @@ export function GameScreen({
 				onPress: doRestart,
 			},
 		])
-	}, [campaignLevel, dispatch, isCampaign, isDirty, session])
+	}, [campaignLevel, dispatch, isCampaign, isDaily, isDirty, session])
 
 	const handleAppend = useCallback(() => {
 		const before = sessionLiveRef.current
@@ -356,6 +531,10 @@ export function GameScreen({
 			if (!outcome || !outcome.delivered) {
 				return
 			}
+			// Delivered Hint (free or rewarded) counts toward lifetime statistics.
+			if (isCampaign || isDaily) {
+				void recordGameplayStats({ hints: 1 })
+			}
 			if (isCampaign && campaignLevel !== null) {
 				trackEvent('hint_used', {
 					level: campaignLevel,
@@ -364,7 +543,13 @@ export function GameScreen({
 				})
 			}
 		},
-		[campaignLevel, isCampaign, requestHint],
+		[
+			campaignLevel,
+			isCampaign,
+			isDaily,
+			recordGameplayStats,
+			requestHint,
+		],
 	)
 
 	const handleHint = useCallback(() => {
@@ -668,6 +853,31 @@ export function GameScreen({
 		withOptionalInterstitial,
 	])
 
+	const handleDailyReplay = useCallback(async () => {
+		if (nextGuard.current || !dailyDateKey) {
+			return
+		}
+		nextGuard.current = true
+		try {
+			const result = await startDailyPuzzle()
+			if (!result.ok || !result.identity || !result.board) {
+				Alert.alert(strings.errorTitle, result.reason ?? strings.errorGeneric)
+				return
+			}
+			completionCommitted.current = null
+			levelStartedKey.current = null
+			levelCompletedAnalyticsKey.current = null
+			lastSyncedKey.current = null
+			setDismissedCompletionKey(null)
+			startSession(result.identity, result.board, {
+				undoAfterCompletion: false,
+			})
+			onReplaceGame?.()
+		} finally {
+			nextGuard.current = false
+		}
+	}, [dailyDateKey, onReplaceGame, startDailyPuzzle, startSession])
+
 	const completionHome = useCallback(() => {
 		if (isDensityLab && onDensityLab) {
 			onDensityLab()
@@ -719,19 +929,23 @@ export function GameScreen({
 		completionKey !== null && completionKey !== dismissedCompletionKey
 
 	const undoAllowedAfterCompletion =
-		session.undoAfterCompletion !== false && !isCampaign
+		session.undoAfterCompletion !== false && !isCampaign && !isDaily
 
 	const headerTitle = isCampaign && campaignLevel
 		? strings.levelHeader(campaignLevel)
-		: isDensityLab && densityMeta
-			? densityMeta.label
-			: strings.appName
+		: isDaily && dailyDateKey
+			? strings.dailyPuzzleHeader
+			: isDensityLab && densityMeta
+				? densityMeta.label
+				: strings.appName
 	// Campaign: level + optional difficulty only — never seed/fingerprint.
 	const headerSubtitle = isCampaign
 		? strings.profileLabel(session.identity.profile)
-		: isDensityLab
-			? session.identity.label
-			: session.identity.label
+		: isDaily && dailyDateKey
+			? formatLocalDateRu(dailyDateKey)
+			: isDensityLab
+				? session.identity.label
+				: session.identity.label
 
 	const showNext =
 		isCampaign &&
@@ -743,13 +957,24 @@ export function GameScreen({
 	const completionTitle =
 		isCampaign && campaignLevel
 			? strings.levelCompletedTitle(campaignLevel)
-			: strings.completedTitle
+			: isDaily
+				? strings.dailyPuzzleHeader
+				: strings.completedTitle
 
-	const completionMode = !isCampaign
-		? 'dev'
-		: campaignPurpose === 'replay'
-			? 'campaign_replay'
-			: 'campaign_progression'
+	const completionMode = isDaily
+		? 'daily'
+		: !isCampaign
+			? 'dev'
+			: campaignPurpose === 'replay'
+				? 'campaign_replay'
+				: 'campaign_progression'
+
+	const dailyStreakNote =
+		isDaily && dailyDateKey
+			? strings.dailyCompletionStreak(
+					getDailySummary(dailyDateKey).activeStreak,
+				)
+			: undefined
 
 	return (
 		<View
@@ -833,12 +1058,15 @@ export function GameScreen({
 				body={
 					isCampaign
 						? strings.levelCompletedTitle(campaignLevel ?? 0)
-						: strings.completedBody
+						: isDaily
+							? strings.completedBody
+							: strings.completedBody
 				}
 				counters={session.counters}
 				mode={completionMode}
+				footerNote={dailyStreakNote}
 				attemptStars={
-					isCampaign
+					isCampaign || isDaily
 						? starsFromAttempt({
 								usedHint: session.usedHint,
 								usedUndo: session.usedUndo,
@@ -856,9 +1084,11 @@ export function GameScreen({
 				nextBusy={nextBusy}
 				onNext={showNext ? () => void handleNext() : undefined}
 				onReplay={
-					isCampaign || isDensityLab
-						? () => void handleReplay()
-						: undefined
+					isDaily
+						? () => void handleDailyReplay()
+						: isCampaign || isDensityLab
+							? () => void handleReplay()
+							: undefined
 				}
 				onHome={completionHome}
 				homeLabel={
@@ -873,7 +1103,7 @@ export function GameScreen({
 					undoAllowedAfterCompletion && session.history.length > 0
 				}
 				onUndo={() => dispatch({ type: 'UNDO' })}
-				showRestart={!isCampaign && !isDensityLab}
+				showRestart={!isCampaign && !isDensityLab && !isDaily}
 				onRestart={confirmRestart}
 			/>
 		</View>

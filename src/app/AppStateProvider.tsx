@@ -31,26 +31,62 @@ import { strings } from '../i18n/strings.ru'
 import {
 	PersistRepository,
 	buildActiveSession,
+	buildDailyActiveSession,
 	createAsyncStorageAdapter,
 	createDefaultRoot,
 	type PersistedActiveSession,
-	type PersistedRootV2,
+	type PersistedRootV3,
 	type PersistedSessionPurpose,
+	type PersistedStatistics,
 	type StorageAdapter,
+	type ThemePreference,
 } from '../storage'
 import { totalStars, type StarCount } from '../game/stars'
-import { spacing, typography, useTheme } from '../theme'
+import {
+	createDailyPuzzle,
+	getActiveCurrentStreak,
+	isDailyCompletedOn,
+	localDateKey,
+	type LocalDateKey,
+} from '../daily'
+import type { PersistedDailyState } from '../daily/types'
+import { starsFromAttempt } from '../game/stars'
+import { spacing, typography, getThemeColors } from '../theme'
+import { trackEvent } from '../analytics'
+import {
+	evaluateAchievementUnlocks,
+	type AchievementNotifyContext,
+} from './achievementsNotify'
 import type { AppRouteName } from '../navigation'
 import {
 	frontierLevel,
+	dailyIdentity,
 	gameSessionFromPersisted,
+	gameSessionFromPersistedDaily,
 	prepareCampaignLevel,
 } from './campaignSession'
 
 export type HydrateStatus = 'pending' | 'ready' | 'failed'
 
 /** How the live GameSession was launched вЂ” controls persist path. */
-export type SessionLaunchSource = 'campaign' | 'dev_fixture' | 'none'
+export type SessionLaunchSource = 'campaign' | 'daily' | 'dev_fixture' | 'none'
+
+export interface StartDailyPuzzleResult {
+	readonly ok: boolean
+	readonly reason?: string
+	readonly dateKey?: LocalDateKey
+	readonly identity?: SessionPuzzleIdentity
+	readonly board?: BoardState
+}
+
+export interface DailySummary {
+	readonly dateKey: LocalDateKey
+	readonly completedToday: boolean
+	readonly bestStarsToday: StarCount
+	readonly activeStreak: number
+	readonly bestStreak: number
+	readonly hasActiveSession: boolean
+}
 
 export interface StartCampaignLevelResult {
 	readonly ok: boolean
@@ -65,10 +101,13 @@ interface AppStateContextValue {
 	readonly hydrateStatus: HydrateStatus
 	/** Decided once after hydrate вЂ” never changes (avoids flicker races). */
 	readonly initialRoute: AppRouteName
-	readonly root: PersistedRootV2
+	readonly root: PersistedRootV3
 	readonly trainingCompleted: boolean
 	readonly highestCompletedLevel: number
 	readonly activeSession: PersistedActiveSession | null
+	readonly daily: PersistedDailyState
+	readonly statistics: PersistedStatistics
+	readonly themePreference: ThemePreference
 	readonly bestStars: readonly StarCount[]
 	readonly totalStars: number
 	readonly sessionSource: SessionLaunchSource
@@ -85,18 +124,40 @@ interface AppStateContextValue {
 	readonly commitProgressionCompletion: (
 		level: number,
 		session: GameSessionState,
-	) => Promise<PersistedRootV2 | null>
+	) => Promise<PersistedRootV3 | null>
 	readonly commitReplayCompletion: (
 		level: number,
 		session: GameSessionState,
-	) => Promise<PersistedRootV2 | null>
+	) => Promise<PersistedRootV3 | null>
+	readonly startDailyPuzzle: () => Promise<StartDailyPuzzleResult>
+	readonly syncDailyFromGameplay: (session: GameSessionState) => Promise<void>
+	readonly commitDailyCompletion: (
+		session: GameSessionState,
+	) => Promise<AchievementNotifyContext | null>
+	readonly buildRestoredDailySession: () => GameSessionState | null
+	readonly getDailySummary: (todayKey: LocalDateKey) => DailySummary
+	readonly discardStaleDailyIfDateChanged: (
+		todayKey: LocalDateKey,
+	) => Promise<void>
 	readonly clearActiveSession: () => Promise<void>
 	readonly syncSessionFromGameplay: (
 		session: GameSessionState,
 	) => Promise<void>
+	readonly setThemePreference: (preference: ThemePreference) => Promise<void>
+	readonly recordGameplayStats: (input: {
+		readonly pairs?: number
+		readonly appends?: number
+		readonly hints?: number
+		readonly undos?: number
+	}) => Promise<void>
+	readonly evaluateAndNotifyAchievements: () => AchievementNotifyContext
+	readonly achievementToastQueue: readonly string[]
+	readonly pushAchievementToasts: (ids: readonly string[]) => void
+	readonly dismissAchievementToast: (achievementId: string) => Promise<void>
 	readonly resetProgress: () => Promise<void>
 	readonly markDevFixtureSession: () => void
 	readonly markCampaignSession: () => void
+	readonly markDailySession: () => void
 	readonly clearSessionSource: () => void
 	/** Build GameSessionState from persisted activeSession (caller restores). */
 	readonly buildRestoredGameSession: () => GameSessionState | null
@@ -116,14 +177,17 @@ export function AppStateProvider({
 	/** Inject memory adapter in tests. */
 	readonly adapter?: StorageAdapter
 }) {
-	const theme = useTheme()
+	const loadingColors = getThemeColors('light')
 	const [repository] = useState(() => createRepository(adapter))
 
 	const [hydrateStatus, setHydrateStatus] = useState<HydrateStatus>('pending')
-	const [root, setRoot] = useState<PersistedRootV2>(createDefaultRoot)
+	const [root, setRoot] = useState<PersistedRootV3>(createDefaultRoot)
 	const [initialRoute, setInitialRoute] = useState<AppRouteName>('home')
 	const [sessionSource, setSessionSource] =
 		useState<SessionLaunchSource>('none')
+	const [achievementToastQueue, setAchievementToastQueue] = useState<
+		readonly string[]
+	>([])
 	const initialRouteLocked = useRef(false)
 	const completionInFlight = useRef(false)
 
@@ -135,15 +199,21 @@ export function AppStateProvider({
 				if (cancelled) {
 					return
 				}
-				setRoot(hydrated)
+				const todayKey = localDateKey(new Date())
+				const afterStale = await repository.discardStaleDailyActiveIfDateChanged(
+					todayKey,
+				)
+				setRoot(afterStale)
 				if (!initialRouteLocked.current) {
 					initialRouteLocked.current = true
 					setInitialRoute(
 						hydrated.trainingCompleted ? 'home' : 'training',
 					)
 				}
-				if (hydrated.activeSession) {
+				if (afterStale.activeSession) {
 					setSessionSource('campaign')
+				} else if (afterStale.daily.activeDaily) {
+					setSessionSource('daily')
 				}
 				setHydrateStatus('ready')
 			} catch (err) {
@@ -235,7 +305,7 @@ export function AppStateProvider({
 		async (
 			level: number,
 			session: GameSessionState,
-		): Promise<PersistedRootV2 | null> => {
+		): Promise<PersistedRootV3 | null> => {
 			// Guard double-tap / concurrent Next+complete races.
 			if (completionInFlight.current) {
 				return null
@@ -285,7 +355,7 @@ export function AppStateProvider({
 		async (
 			level: number,
 			session: GameSessionState,
-		): Promise<PersistedRootV2 | null> => {
+		): Promise<PersistedRootV3 | null> => {
 			if (completionInFlight.current) {
 				return null
 			}
@@ -325,11 +395,221 @@ export function AppStateProvider({
 		[repository, sessionSource],
 	)
 
+	const startDailyPuzzle = useCallback(async (): Promise<StartDailyPuzzleResult> => {
+		const todayKey = localDateKey(new Date())
+		await repository.discardStaleDailyActiveIfDateChanged(todayKey)
+		const generated = createDailyPuzzle(todayKey)
+		if (!generated.ok) {
+			return { ok: false, reason: generated.reason }
+		}
+		const session = buildDailyActiveSession({
+			dateKey: todayKey,
+			seed: generated.seed,
+			profile: generated.profile,
+			fingerprint: generated.fingerprint,
+			density: generated.density,
+			board: generated.board,
+			initialBoard: generated.board,
+			history: [],
+			counters: {
+				matchesRemoved: 0,
+				appendActions: 0,
+				undoActions: 0,
+			},
+			generationVersion: generated.generationVersion,
+			usedHint: false,
+			usedUndo: false,
+			freeHintConsumed: false,
+			freeUndoConsumed: false,
+		})
+		const next = await repository.setActiveDailySession(session)
+		setRoot(next)
+		setSessionSource('daily')
+		return {
+			ok: true,
+			dateKey: todayKey,
+			identity: dailyIdentity(todayKey, {
+				seed: generated.seed,
+				profile: generated.profile,
+				fingerprint: generated.fingerprint,
+			}),
+			board: generated.board,
+		}
+	}, [repository])
+
+	const syncDailyFromGameplay = useCallback(
+		async (session: GameSessionState) => {
+			if (sessionSource !== 'daily') {
+				return
+			}
+			const active = repository.getRoot().daily.activeDaily
+			if (!active) {
+				return
+			}
+			const next = await repository.syncDailyGameplay({
+				board: session.board,
+				history: session.history,
+				counters: session.counters,
+				usedHint: session.usedHint,
+				usedUndo: session.usedUndo,
+				freeHintConsumed: session.freeHintConsumed,
+				freeUndoConsumed: session.freeUndoConsumed,
+			})
+			setRoot(next)
+		},
+		[repository, sessionSource],
+	)
+
+	const recordGameplayStats = useCallback(
+		async (input: {
+			readonly pairs?: number
+			readonly appends?: number
+			readonly hints?: number
+			readonly undos?: number
+		}) => {
+			if (
+				(input.pairs ?? 0) === 0 &&
+				(input.appends ?? 0) === 0 &&
+				(input.hints ?? 0) === 0 &&
+				(input.undos ?? 0) === 0
+			) {
+				return
+			}
+			const next = await repository.bumpStatistics({
+				pairs: input.pairs,
+				appends: input.appends,
+				hints: input.hints,
+				undos: input.undos,
+			})
+			setRoot(next)
+		},
+		[repository],
+	)
+
+	const commitDailyCompletion = useCallback(
+		async (
+			session: GameSessionState,
+		): Promise<AchievementNotifyContext | null> => {
+			if (completionInFlight.current || sessionSource !== 'daily') {
+				return null
+			}
+			const active = repository.getRoot().daily.activeDaily
+			if (!active) {
+				return null
+			}
+			completionInFlight.current = true
+			try {
+				const stars = starsFromAttempt({
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+				})
+				let next = await repository.commitDailyCompletion({
+					dateKey: active.dateKey,
+					stars,
+					counters: session.counters,
+					usedHint: session.usedHint,
+					usedUndo: session.usedUndo,
+					freeHintConsumed: session.freeHintConsumed,
+					freeUndoConsumed: session.freeUndoConsumed,
+				})
+				// Lifetime counters are incremented during play via recordGameplayStats —
+				// do not re-add session totals here (would double-count).
+				setRoot(next)
+				const unlocks = evaluateAchievementUnlocks(next)
+				setSessionSource('none')
+				return {
+					...unlocks,
+					dailyStreakAfter: getActiveCurrentStreak(next.daily, active.dateKey),
+				}
+			} finally {
+				completionInFlight.current = false
+			}
+		},
+		[repository, sessionSource],
+	)
+
+	const buildRestoredDailySession = useCallback((): GameSessionState | null => {
+		const active = root.daily.activeDaily
+		if (!active) {
+			return null
+		}
+		const state = gameSessionFromPersistedDaily(active)
+		if (!state) {
+			return null
+		}
+		return { ...state, undoAfterCompletion: false }
+	}, [root.daily.activeDaily])
+
+	const getDailySummary = useCallback(
+		(todayKey: LocalDateKey): DailySummary => {
+			const daily = root.daily
+			const todayEntry = daily.history.find((row) => row.dateKey === todayKey)
+			return {
+				dateKey: todayKey,
+				completedToday: isDailyCompletedOn(daily, todayKey),
+				bestStarsToday: todayEntry?.bestStars ?? 0,
+				activeStreak: getActiveCurrentStreak(daily, todayKey),
+				bestStreak: daily.bestStreak,
+				hasActiveSession: daily.activeDaily?.dateKey === todayKey,
+			}
+		},
+		[root.daily],
+	)
+
+	const discardStaleDailyIfDateChanged = useCallback(
+		async (todayKey: LocalDateKey) => {
+			const next = await repository.discardStaleDailyActiveIfDateChanged(
+				todayKey,
+			)
+			setRoot(next)
+		},
+		[repository],
+	)
+
+	const setThemePreference = useCallback(
+		async (preference: ThemePreference) => {
+			const next = await repository.setThemePreference(preference)
+			setRoot(next)
+		},
+		[repository],
+	)
+
+	const evaluateAndNotifyAchievements = useCallback((): AchievementNotifyContext => {
+		return evaluateAchievementUnlocks(repository.getRoot())
+	}, [repository])
+
+	const pushAchievementToasts = useCallback((ids: readonly string[]) => {
+		if (ids.length === 0) {
+			return
+		}
+		setAchievementToastQueue((prev) => {
+			const merged = new Set(prev)
+			for (const id of ids) {
+				merged.add(id)
+			}
+			return [...merged]
+		})
+	}, [])
+
+	const dismissAchievementToast = useCallback(
+		async (achievementId: string) => {
+			trackEvent('achievement_unlocked', { achievementId })
+			const next = await repository.markAchievementsNotified([achievementId])
+			setRoot(next)
+			setAchievementToastQueue((prev) =>
+				prev.filter((id) => id !== achievementId),
+			)
+		},
+		[repository],
+	)
+
 	const clearActiveSession = useCallback(async () => {
 		const next = await repository.clearActiveSession()
 		setRoot(next)
-		setSessionSource('none')
-	}, [repository])
+		if (sessionSource === 'campaign') {
+			setSessionSource('none')
+		}
+	}, [repository, sessionSource])
 
 	const syncSessionFromGameplay = useCallback(
 		async (session: GameSessionState) => {
@@ -372,6 +652,10 @@ export function AppStateProvider({
 		setSessionSource('campaign')
 	}, [])
 
+	const markDailySession = useCallback(() => {
+		setSessionSource('daily')
+	}, [])
+
 	const clearSessionSource = useCallback(() => {
 		setSessionSource('none')
 	}, [])
@@ -396,19 +680,35 @@ export function AppStateProvider({
 			trainingCompleted: root.trainingCompleted,
 			highestCompletedLevel: root.highestCompletedLevel,
 			activeSession: root.activeSession,
+			daily: root.daily,
+			statistics: root.statistics,
+			themePreference: root.settings.themePreference,
 			bestStars: root.bestStars,
 			totalStars: totalStars(root.bestStars),
 			sessionSource,
 			repository,
 			completeTraining,
 			startCampaignLevel,
+			startDailyPuzzle,
 			commitProgressionCompletion,
 			commitReplayCompletion,
+			syncDailyFromGameplay,
+			commitDailyCompletion,
+			buildRestoredDailySession,
+			getDailySummary,
+			discardStaleDailyIfDateChanged,
 			clearActiveSession,
 			syncSessionFromGameplay,
+			setThemePreference,
+			recordGameplayStats,
+			evaluateAndNotifyAchievements,
+			achievementToastQueue,
+			pushAchievementToasts,
+			dismissAchievementToast,
 			resetProgress,
 			markDevFixtureSession,
 			markCampaignSession,
+			markDailySession,
 			clearSessionSource,
 			buildRestoredGameSession,
 		}),
@@ -420,13 +720,26 @@ export function AppStateProvider({
 			repository,
 			completeTraining,
 			startCampaignLevel,
+			startDailyPuzzle,
 			commitProgressionCompletion,
 			commitReplayCompletion,
+			syncDailyFromGameplay,
+			commitDailyCompletion,
+			buildRestoredDailySession,
+			getDailySummary,
+			discardStaleDailyIfDateChanged,
 			clearActiveSession,
 			syncSessionFromGameplay,
+			setThemePreference,
+			recordGameplayStats,
+			evaluateAndNotifyAchievements,
+			achievementToastQueue,
+			pushAchievementToasts,
+			dismissAchievementToast,
 			resetProgress,
 			markDevFixtureSession,
 			markCampaignSession,
+			markDailySession,
 			clearSessionSource,
 			buildRestoredGameSession,
 		],
@@ -435,12 +748,17 @@ export function AppStateProvider({
 	if (hydrateStatus === 'pending') {
 		return (
 			<View
-				style={[styles.loading, { backgroundColor: theme.colors.background }]}
+				style={[
+					styles.loading,
+					{ backgroundColor: loadingColors.background },
+				]}
 				testID="app-loading"
 				accessibilityLabel={strings.loading}
 			>
-				<ActivityIndicator color={theme.colors.accent} />
-				<Text style={[styles.loadingText, { color: theme.colors.textMuted }]}>
+				<ActivityIndicator color={loadingColors.accent} />
+				<Text
+					style={[styles.loadingText, { color: loadingColors.textMuted }]}
+				>
 					{strings.loading}
 				</Text>
 			</View>
@@ -461,11 +779,12 @@ export function useAppState(): AppStateContextValue {
 }
 
 /** DEV diagnostics helper вЂ” campaignVersion stays in sync with catalog. */
-export function formatDevDiagnostics(root: PersistedRootV2): string {
-	const level = root.activeSession?.level ?? 'вЂ”'
+export function formatDevDiagnostics(root: PersistedRootV3): string {
+	const level = root.activeSession?.level ?? '—'
+	const dailyDate = root.daily.activeDaily?.dateKey ?? '—'
 	return (
-		`schema ${root.schemaVersion} В· campaign v${CAMPAIGN_VERSION} ` +
-		`В· level ${level} В· rev ${root.revision}`
+		`schema ${root.schemaVersion} · campaign v${CAMPAIGN_VERSION} ` +
+		`· level ${level} · daily ${dailyDate} · rev ${root.revision}`
 	)
 }
 

@@ -35,7 +35,6 @@ export function getBannerUnitId(placement: BannerPlacement): string {
 /**
  * Map navigation route → banner placement, or null when ads must not load.
  * Training and Density Lab never request banners.
- * Placeholder hubs (daily / statistics / achievements) stay ad-free until real UI exists.
  */
 export function resolveBannerPlacement(
 	route: AppRouteName,
@@ -45,15 +44,16 @@ export function resolveBannerPlacement(
 			return 'game'
 		case 'home':
 		case 'levels':
+		case 'daily':
 			return 'home_levels'
 		case 'settings':
 		case 'about':
+		case 'statistics':
+		case 'achievements':
+		case 'rules':
 			return 'secondary'
 		case 'training':
 		case 'densityLab':
-		case 'daily':
-		case 'statistics':
-		case 'achievements':
 			return null
 		default: {
 			const _exhaustive: never = route

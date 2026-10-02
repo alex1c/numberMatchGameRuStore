@@ -17,6 +17,7 @@
     "generator:audit:gv3": "tsx src/game/generator/auditCli.ts -- --gv3 --density all",
     "campaign:build": "tsx src/game/campaign/builderCli.ts",
     "campaign:audit": "tsx src/game/campaign/auditCli.ts",
+    "daily:audit": "tsx src/daily/auditCli.ts",
     "android:qa": "powershell -ExecutionPolicy Bypass -File ./scripts/android/android-device-qa.ps1"
   },
   "dependencies": {

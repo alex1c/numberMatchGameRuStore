@@ -15,7 +15,10 @@ import {
 	type GameSessionState,
 	type SessionPuzzleIdentity,
 } from '../game/session'
+import type { LocalDateKey } from '../daily/date'
+import type { PersistedDailyActiveSession } from '../daily/types'
 import {
+	deserializeBoard,
 	sessionBoards,
 	type PersistedActiveSession,
 	type PersistedSessionPurpose,
@@ -119,6 +122,66 @@ export function frontierLevel(highestCompletedLevel: number): number {
 		return CAMPAIGN_LEVEL_COUNT
 	}
 	return highestCompletedLevel + 1
+}
+
+/** Build SessionPuzzleIdentity for a daily puzzle. */
+export function dailyIdentity(
+	dateKey: LocalDateKey,
+	entry: {
+		readonly seed: number
+		readonly profile: PersistedDailyActiveSession['profile']
+		readonly fingerprint: string
+	},
+): SessionPuzzleIdentity {
+	return {
+		generationVersion: GENERATION_VERSION,
+		difficultyProfileVersion: DIFFICULTY_PROFILE_VERSION,
+		seed: entry.seed,
+		profile: entry.profile,
+		fingerprint: entry.fingerprint,
+		label: `daily-${dateKey}`,
+	}
+}
+
+/** Runtime boards for a persisted daily active session. */
+export function dailySessionBoards(session: PersistedDailyActiveSession): {
+	readonly board: GameSessionState['board']
+	readonly initialBoard: GameSessionState['board'] | null
+	readonly history: readonly GameSessionState['board'][]
+} {
+	return {
+		board: deserializeBoard(session.board),
+		initialBoard: session.initialBoard
+			? deserializeBoard(session.initialBoard)
+			: null,
+		history: session.history.map(deserializeBoard),
+	}
+}
+
+/**
+ * Rebuild GameSessionState from persisted daily active session.
+ * Requires stored initialBoard (always written at daily start).
+ */
+export function gameSessionFromPersistedDaily(
+	session: PersistedDailyActiveSession,
+): GameSessionState | null {
+	const boards = dailySessionBoards(session)
+	const initialBoard = boards.initialBoard
+	if (!initialBoard) {
+		return null
+	}
+	return hydrateGameSession({
+		identity: dailyIdentity(session.dateKey, session),
+		board: boards.board,
+		initialBoard,
+		history: boards.history,
+		counters: session.counters,
+		completed: false,
+		usedHint: session.usedHint,
+		usedUndo: session.usedUndo,
+		freeHintConsumed: session.freeHintConsumed,
+		freeUndoConsumed: session.freeUndoConsumed,
+	})
 }
 
 /** True when level is unlocked for play / replay. */

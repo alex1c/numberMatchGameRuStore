@@ -13,13 +13,21 @@ export type {
 	PersistedRoot,
 	PersistedRootV1,
 	PersistedRootV2,
+	PersistedRootV3,
 	PersistedSessionPurpose,
 	PersistedSessionStatus,
+	PersistedSettings,
+	PersistedStatistics,
 	StorageAdapter,
+	ThemePreference,
 } from './types'
 export { PERSIST_SCHEMA_VERSION } from './types'
 
-export { createDefaultRoot } from './defaults'
+export {
+	createDefaultRoot,
+	createDefaultSettings,
+	createDefaultStatistics,
+} from './defaults'
 
 export {
 	serializeBoard,
@@ -34,12 +42,19 @@ export {
 export {
 	validatePersistedBoard,
 	validateActiveSession,
+	validateDailyActiveSession,
+	validateDailyState,
 	validatePersistedRoot,
+	validatePersistedRootV2,
 	parsePersistedRootJson,
 } from './validate'
 export type { ValidateResult } from './validate'
 
-export { migrateToCurrent, migrateParsedOrDefault } from './migrate'
+export {
+	migrateToCurrent,
+	migrateParsedOrDefault,
+	migrateRootV2ToV3,
+} from './migrate'
 
 export { PersistWriteQueue } from './writeQueue'
 export type { WriteQueueResult } from './writeQueue'
@@ -48,6 +63,7 @@ export {
 	PersistRepository,
 	validateSessionSemantics,
 	buildActiveSession,
+	buildDailyActiveSession,
 } from './repository'
 
 export {

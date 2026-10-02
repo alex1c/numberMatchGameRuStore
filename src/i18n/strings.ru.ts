@@ -4,7 +4,8 @@
  */
 
 export const strings = {
-	appName: 'Number Match',
+	appName: 'Пары чисел',
+	homeBrandEn: 'Number Match',
 	back: 'Назад',
 	home: 'На главную',
 	continue: 'Продолжить',
@@ -115,4 +116,91 @@ export const strings = {
 	densityLabV2Note:
 		'Ширина 8 уже удобна на OPPO. Сравните высоту: 6→10 рядов.',
 	densityLabV1Section: 'V1 reference (width survey)',
+	dailyHubTitle: 'Головоломка дня',
+	dailyPuzzleHeader: 'Головоломка дня',
+	dailyToday: (dateLabel: string) => `Сегодня: ${dateLabel}`,
+	dailyStatusCompleted: 'Сегодняшняя головоломка уже пройдена.',
+	dailyStatusInProgress: 'Есть незавершённая попытка.',
+	dailyStatusOpen: 'Новая головоломка ждёт вас.',
+	dailyPlay: 'Играть',
+	dailyContinue: 'Продолжить',
+	dailyReplay: 'Сыграть снова',
+	dailyStreakActive: (days: number) => `Серия: ${days} ${pluralDays(days)}`,
+	dailyStreakBest: (days: number) => `Лучшая серия: ${days}`,
+	dailyStreakActiveLabel: 'Текущая серия',
+	dailyStreakBestLabel: 'Лучшая серия',
+	dailyRecentTitle: 'Последние дни',
+	dailyCardTitle: 'Головоломка дня',
+	dailyCardOpen: 'Сегодня ещё не решена',
+	dailyCardDone: (stars: number) =>
+		`Сегодня: ${'★'.repeat(Math.max(0, Math.min(3, stars)))}${'☆'.repeat(Math.max(0, 3 - stars))}`,
+	dailyCardContinue: 'Продолжить сегодняшнюю',
+	dailyCompletionStreak: (days: number) =>
+		`Серия: ${days} ${pluralDays(days)}`,
+	statisticsTitle: 'Статистика',
+	statsGroupCampaign: 'Кампания',
+	statsGroupGameplay: 'Игра',
+	statsGroupDaily: 'Ежедневная',
+	statsLevelsCleared: 'Уровни',
+	statsStarsTotal: 'Звёзды',
+	statsThreeStarLevels: 'На 3★',
+	statsPairsRemoved: 'Найдено пар',
+	statsAppendActions: 'Добавлений чисел',
+	statsHintsDelivered: 'Подсказок',
+	statsUndoActions: 'Отмен',
+	statsDailyCompleted: 'Решено',
+	achievementsTitle: 'Достижения',
+	achievementsProgress: (unlocked: number, total: number) =>
+		`Открыто: ${unlocked} из ${total}`,
+	achievementRequirement: (text: string) => `Нужно: ${text}`,
+	achievementProgressLine: (current: number, target: number) =>
+		`${current} / ${target}`,
+	achievementUnlockedKicker: 'Достижение',
+	achievementUnlockedA11y: (title: string) => `Достижение: ${title}`,
+	settingsTitle: 'Настройки',
+	settingsThemeSection: 'Тема',
+	settingsTrainingNote: 'Повторить обучение',
+	themeOptionLabel: (pref: string): string => {
+		switch (pref) {
+			case 'system':
+				return 'Как в системе'
+			case 'light':
+				return 'Светлая'
+			case 'dark':
+				return 'Тёмная'
+			default:
+				return pref
+		}
+	},
+	aboutTitle: 'О приложении',
+	aboutVersion: (version: string) => `Версия ${version}`,
+	aboutDeveloper: (name: string) => `Разработчик: ${name}`,
+	aboutWebsite: 'Сайт ForestMusic',
+	aboutOtherApps: 'Другие приложения',
+	aboutPrivacy: 'Политика конфиденциальности',
+	aboutLinkFailed: (label: string) =>
+		`Не удалось открыть «${label}». Проверьте браузер или ссылку.`,
+	rulesTitle: 'Правила',
+	rulesParagraphs: [
+		'Соединяйте пары чисел на поле: одинаковые цифры или две цифры в сумме дают 10.',
+		'Пары можно брать по горизонтали, вертикали и диагонали, если между ними нет других чисел.',
+		'После хода числа сдвигаются — пустые клетки исчезают.',
+		'Если ходов не осталось, нажмите «Добавить», чтобы дописать числа с поля.',
+		'Цель — очистить поле. В кампании за уровень можно получить до трёх звёзд: без подсказки и без отмены — три звезды.',
+	],
+	navStatistics: 'Статистика',
+	navAchievements: 'Достижения',
+	navSettings: 'Настройки',
 } as const
+
+function pluralDays(count: number): string {
+	const mod10 = count % 10
+	const mod100 = count % 100
+	if (mod10 === 1 && mod100 !== 11) {
+		return 'день'
+	}
+	if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+		return 'дня'
+	}
+	return 'дней'
+}

@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "Number Match",
+    "name": "Пары чисел — Number Match",
     "slug": "number-match",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/icon_gpt.png",
     "scheme": "number-match",
     "userInterfaceStyle": "automatic",
     "ios": {

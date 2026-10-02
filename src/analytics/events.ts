@@ -21,6 +21,10 @@ export const ANALYTICS_EVENT_NAMES = [
 	'ad_rewarded_requested',
 	'ad_rewarded_completed',
 	'ad_rewarded_failed',
+	'daily_started',
+	'daily_completed',
+	'achievement_unlocked',
+	'theme_changed',
 ] as const
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number]
@@ -66,6 +70,17 @@ const ALLOWED_PARAMETERS: Record<AnalyticsEventName, readonly string[]> = {
 	ad_rewarded_requested: ['reward', 'level'],
 	ad_rewarded_completed: ['reward', 'level'],
 	ad_rewarded_failed: ['reward', 'level', 'error_category'],
+	daily_started: ['dateKey', 'difficulty'],
+	daily_completed: [
+		'dateKey',
+		'stars',
+		'difficulty',
+		'usedHint',
+		'usedUndo',
+		'streak',
+	],
+	achievement_unlocked: ['achievementId'],
+	theme_changed: ['theme'],
 }
 
 export type AnalyticsParameter = string | number | boolean

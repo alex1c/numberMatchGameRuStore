@@ -10,7 +10,11 @@ import type { StarCount } from '../../game/stars'
 import { spacing, typography, useTheme } from '../../theme'
 import { StarChecklist, StarsRow } from './StarsRow'
 
-export type CompletionMode = 'campaign_progression' | 'campaign_replay' | 'dev'
+export type CompletionMode =
+	| 'campaign_progression'
+	| 'campaign_replay'
+	| 'daily'
+	| 'dev'
 
 interface CompletionOverlayProps {
 	readonly visible: boolean
@@ -37,6 +41,8 @@ interface CompletionOverlayProps {
 	readonly onUndo?: () => void
 	readonly showRestart?: boolean
 	readonly onRestart?: () => void
+	/** Extra line under stars (e.g. daily streak). */
+	readonly footerNote?: string
 }
 
 export function CompletionOverlay({
@@ -60,9 +66,12 @@ export function CompletionOverlay({
 	onUndo,
 	showRestart = false,
 	onRestart,
+	footerNote,
 }: CompletionOverlayProps) {
 	const theme = useTheme()
 	const isCampaign = mode === 'campaign_progression' || mode === 'campaign_replay'
+	const isDaily = mode === 'daily'
+	const showStars = isCampaign || isDaily
 
 	return (
 		<Modal
@@ -86,7 +95,7 @@ export function CompletionOverlay({
 							{body}
 						</Text>
 					) : null}
-					{isCampaign && attemptStars !== undefined ? (
+					{showStars && attemptStars !== undefined ? (
 						<>
 							<View style={styles.starsWrap}>
 								<StarsRow stars={attemptStars} size="lg" testID="completion-stars" />
@@ -94,7 +103,12 @@ export function CompletionOverlay({
 							<StarChecklist usedHint={usedHint} usedUndo={usedUndo} />
 						</>
 					) : null}
-					{!isCampaign ? (
+					{footerNote ? (
+						<Text style={[styles.body, { color: theme.colors.textMuted }]}>
+							{footerNote}
+						</Text>
+					) : null}
+					{!isCampaign && !isDaily ? (
 						<Text style={[styles.meta, { color: theme.colors.textMuted }]}>
 							{strings.completionStats(
 								counters.matchesRemoved,

@@ -43,9 +43,15 @@ export function isFreeUndoConsumed(usage: HelpAttemptUsage): boolean {
  * Production Campaign is always monetized (even inside a debug build).
  */
 export function isHelpMonetized(
-	sessionSource: 'campaign' | 'dev_fixture' | 'none' | null | undefined,
+	sessionSource:
+		| 'campaign'
+		| 'daily'
+		| 'dev_fixture'
+		| 'none'
+		| null
+		| undefined,
 ): boolean {
-	return sessionSource === 'campaign'
+	return sessionSource === 'campaign' || sessionSource === 'daily'
 }
 
 /**

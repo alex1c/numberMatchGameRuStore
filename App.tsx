@@ -18,29 +18,22 @@ import {
 	resolveBannerPlacement,
 } from './src/ads'
 import { initializeAnalytics, trackEvent } from './src/analytics'
+import { AchievementToast } from './src/components/AchievementToast'
 import { BannerSlot } from './src/components/BannerSlot'
 import { TrainingScreen } from './src/features/training'
 import { GameSessionProvider, useGameSession } from './src/game/session/GameSessionContext'
 import { useAppNavigation, type AppRouteName } from './src/navigation'
+import { AboutScreen } from './src/screens/AboutScreen'
+import { AchievementsScreen } from './src/screens/AchievementsScreen'
+import { DailyHubScreen } from './src/screens/DailyHubScreen'
 import { GameScreen } from './src/screens/GameScreen'
 import { HomeScreen } from './src/screens/HomeScreen'
 import { LevelsScreen } from './src/screens/LevelsScreen'
 import { DensityLabScreen } from './src/screens/DensityLabScreen'
-import { PlaceholderScreen } from './src/screens/PlaceholderScreen'
+import { RulesScreen } from './src/screens/RulesScreen'
+import { SettingsScreen } from './src/screens/SettingsScreen'
+import { StatisticsScreen } from './src/screens/StatisticsScreen'
 import { ThemeProvider, useTheme } from './src/theme'
-
-const PLACEHOLDER_COPY: Partial<
-	Record<AppRouteName, { title: string; note?: string }>
-> = {
-	daily: { title: 'Ежедневная', note: 'Режим появится позже.' },
-	statistics: { title: 'Статистика' },
-	achievements: { title: 'Достижения' },
-	settings: { title: 'Настройки' },
-	about: {
-		title: 'О приложении',
-		note: 'Ссылка на другие наши приложения будет настроена перед релизом.',
-	},
-}
 
 /** Map route → low-cardinality screen_view name (ForestMusic-style). */
 function screenNameForRoute(route: AppRouteName): string | null {
@@ -53,6 +46,12 @@ function screenNameForRoute(route: AppRouteName): string | null {
 			return 'Game'
 		case 'training':
 			return 'Training'
+		case 'daily':
+			return 'Daily'
+		case 'statistics':
+			return 'Statistics'
+		case 'achievements':
+			return 'Achievements'
 		case 'settings':
 			return 'Settings'
 		case 'about':
@@ -63,11 +62,17 @@ function screenNameForRoute(route: AppRouteName): string | null {
 }
 
 /**
- * Restores persisted campaign session into GameSession once after hydrate.
+ * Restores persisted campaign or daily session into GameSession once after hydrate.
  */
 function SessionRestoreBridge({ children }: { readonly children: ReactElement }) {
-	const { buildRestoredGameSession, activeSession, markCampaignSession } =
-		useAppState()
+	const {
+		buildRestoredGameSession,
+		buildRestoredDailySession,
+		activeSession,
+		daily,
+		markCampaignSession,
+		markDailySession,
+	} = useAppState()
 	const { restoreSession, hasSession } = useGameSession()
 	const restored = useRef(false)
 
@@ -75,21 +80,28 @@ function SessionRestoreBridge({ children }: { readonly children: ReactElement })
 		if (restored.current || hasSession) {
 			return
 		}
-		if (!activeSession) {
-			restored.current = true
-			return
-		}
-		const state = buildRestoredGameSession()
-		if (state) {
-			restoreSession(state)
-			markCampaignSession()
+		if (activeSession) {
+			const state = buildRestoredGameSession()
+			if (state) {
+				restoreSession(state)
+				markCampaignSession()
+			}
+		} else if (daily.activeDaily) {
+			const state = buildRestoredDailySession()
+			if (state) {
+				restoreSession(state)
+				markDailySession()
+			}
 		}
 		restored.current = true
 	}, [
 		activeSession,
+		buildRestoredDailySession,
 		buildRestoredGameSession,
+		daily.activeDaily,
 		hasSession,
 		markCampaignSession,
+		markDailySession,
 		restoreSession,
 	])
 
@@ -102,7 +114,13 @@ function SessionRestoreBridge({ children }: { readonly children: ReactElement })
  */
 function AppShell() {
 	const theme = useTheme()
-	const { initialRoute, startCampaignLevel, trainingCompleted } = useAppState()
+	const {
+		initialRoute,
+		startCampaignLevel,
+		trainingCompleted,
+		achievementToastQueue,
+		dismissAchievementToast,
+	} = useAppState()
 	const { startSession } = useGameSession()
 	const nav = useAppNavigation(initialRoute)
 	const bannerPlacement = resolveBannerPlacement(nav.current)
@@ -146,6 +164,30 @@ function AppShell() {
 				onOpenGame={() => nav.navigate('game')}
 			/>
 		)
+	} else if (nav.current === 'daily') {
+		screen = (
+			<DailyHubScreen
+				onBack={nav.goBack}
+				onOpenGame={() => nav.navigate('game')}
+			/>
+		)
+	} else if (nav.current === 'statistics') {
+		screen = <StatisticsScreen onBack={nav.goBack} />
+	} else if (nav.current === 'achievements') {
+		screen = <AchievementsScreen onBack={nav.goBack} />
+	} else if (nav.current === 'settings') {
+		screen = (
+			<SettingsScreen
+				onBack={nav.goBack}
+				onTraining={() => nav.navigate('training')}
+				onRules={() => nav.navigate('rules')}
+				onAbout={() => nav.navigate('about')}
+			/>
+		)
+	} else if (nav.current === 'about') {
+		screen = <AboutScreen onBack={nav.goBack} />
+	} else if (nav.current === 'rules') {
+		screen = <RulesScreen onBack={nav.goBack} />
 	} else if (nav.current === 'densityLab') {
 		if (typeof __DEV__ === 'undefined' || !__DEV__) {
 			screen = <HomeScreen onNavigate={nav.navigate} />
@@ -167,22 +209,6 @@ function AppShell() {
 				isReplay={trainingCompleted}
 			/>
 		)
-	} else if (nav.current !== 'home') {
-		const copy = PLACEHOLDER_COPY[nav.current]
-		screen = (
-			<PlaceholderScreen
-				routeName={nav.current}
-				title={copy?.title ?? nav.current}
-				note={copy?.note}
-				onClose={() => {
-					if (nav.current === 'about') {
-						nav.goBack()
-						return
-					}
-					nav.goHome()
-				}}
-			/>
-		)
 	}
 
 	return (
@@ -191,6 +217,12 @@ function AppShell() {
 			edges={['top', 'left', 'right']}
 		>
 			<View style={styles.content}>{screen}</View>
+			<AchievementToast
+				queue={achievementToastQueue}
+				onDismiss={(id) => {
+					void dismissAchievementToast(id)
+				}}
+			/>
 			<BannerSlot placement={bannerPlacement} />
 			<SafeAreaView
 				edges={['bottom']}
@@ -204,6 +236,14 @@ function AppShell() {
 	)
 }
 
+/** Applies persisted theme preference after AppState hydrate. */
+function ThemedAppTree({ children }: { readonly children: ReactElement }) {
+	const { themePreference, hydrateStatus } = useAppState()
+	const preference =
+		hydrateStatus === 'ready' ? themePreference : ('system' as const)
+	return <ThemeProvider preference={preference}>{children}</ThemeProvider>
+}
+
 export default function App() {
 	useEffect(() => {
 		initializeAnalytics()
@@ -214,15 +254,15 @@ export default function App() {
 
 	return (
 		<SafeAreaProvider>
-			<ThemeProvider>
-				<AppStateProvider>
+			<AppStateProvider>
+				<ThemedAppTree>
 					<GameSessionProvider>
 						<SessionRestoreBridge>
 							<AppShell />
 						</SessionRestoreBridge>
 					</GameSessionProvider>
-				</AppStateProvider>
-			</ThemeProvider>
+				</ThemedAppTree>
+			</AppStateProvider>
 		</SafeAreaProvider>
 	)
 }

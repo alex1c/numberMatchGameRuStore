@@ -3,7 +3,7 @@
  * DEV fixtures stay below the fold and never persist campaign activeSession.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
 	Alert,
 	Pressable,
@@ -26,8 +26,9 @@ import {
 	type PlaytestFixture,
 } from '../game/session'
 import { useGameSession } from '../game/session/GameSessionContext'
+import { localDateKey } from '../daily'
 import { strings } from '../i18n/strings.ru'
-import { APP_IDENTITY } from '../services/identity'
+import { APP_DISPLAY_NAME_SHORT } from '../about/config'
 import { spacing, typography, useTheme } from '../theme'
 import type { AppRouteName } from '../navigation'
 
@@ -47,7 +48,10 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 		markDevFixtureSession,
 		clearActiveSession,
 		root,
+		getDailySummary,
 	} = useAppState()
+	const todayKey = useMemo(() => localDateKey(new Date()), [])
+	const dailySummary = getDailySummary(todayKey)
 	const { hasSession, isDirty, startSession, clearSession, session } =
 		useGameSession()
 	const [busyId, setBusyId] = useState<string | null>(null)
@@ -184,9 +188,12 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 				style={[styles.title, { color: theme.colors.text }]}
 				accessibilityRole="header"
 			>
-				{APP_IDENTITY.displayName}
+				{APP_DISPLAY_NAME_SHORT}
 			</Text>
 			<Text style={[styles.subtitle, { color: theme.colors.textMuted }]}>
+				{strings.homeBrandEn}
+			</Text>
+			<Text style={[styles.note, { color: theme.colors.textMuted }]}>
 				{strings.homeSubtitle}
 			</Text>
 			<Text style={[styles.note, { color: theme.colors.textMuted }]}>
@@ -243,6 +250,34 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 			</Pressable>
 
 			<Pressable
+				onPress={() => onNavigate('daily')}
+				style={[
+					styles.dailyCard,
+					{
+						borderColor: theme.colors.border,
+						backgroundColor: theme.colors.surface,
+					},
+				]}
+				testID="nav-daily"
+				accessibilityRole="button"
+				accessibilityLabel={strings.dailyCardTitle}
+			>
+				<Text style={{ color: theme.colors.text, fontWeight: '700' }}>
+					{strings.dailyCardTitle}
+				</Text>
+				<Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>
+					{dailySummary.completedToday
+						? strings.dailyCardDone(dailySummary.bestStarsToday)
+						: dailySummary.hasActiveSession
+							? strings.dailyCardContinue
+							: strings.dailyCardOpen}
+				</Text>
+				<Text style={{ color: theme.colors.accent, fontSize: 13 }}>
+					{strings.dailyStreakActive(dailySummary.activeStreak)}
+				</Text>
+			</Pressable>
+
+			<Pressable
 				onPress={() => onNavigate('training')}
 				style={[styles.link, { borderColor: theme.colors.border }]}
 				testID="nav-training"
@@ -259,11 +294,9 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 
 			{(
 				[
-					['daily', 'Ежедневная'],
-					['statistics', 'Статистика'],
-					['achievements', 'Достижения'],
-					['settings', 'Настройки'],
-					['about', 'О приложении'],
+					['statistics', strings.navStatistics],
+					['achievements', strings.navAchievements],
+					['settings', strings.navSettings],
 				] as const
 			).map(([route, label]) => (
 				<Pressable
@@ -272,7 +305,9 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 					style={[styles.link, { borderColor: theme.colors.border }]}
 					testID={`nav-${route}`}
 				>
-					<Text style={{ color: theme.colors.textMuted }}>{label}</Text>
+					<Text style={{ color: theme.colors.text, fontWeight: '600' }}>
+						{label}
+					</Text>
 				</Pressable>
 			))}
 
@@ -483,6 +518,13 @@ const styles = StyleSheet.create({
 		paddingVertical: spacing.sm,
 		paddingHorizontal: spacing.md,
 		gap: 2,
+	},
+	dailyCard: {
+		borderWidth: StyleSheet.hairlineWidth,
+		borderRadius: 12,
+		paddingVertical: spacing.md,
+		paddingHorizontal: spacing.md,
+		gap: 4,
 	},
 	devBlock: {
 		marginTop: spacing.lg,

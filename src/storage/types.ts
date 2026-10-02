@@ -1,14 +1,15 @@
 /**
  * Persistence schema types — versioned root blob under a stable storage key.
  *
- * schemaVersion 2 = Campaign v2 + mastery stars + attempt help flags.
- * freeHintConsumed / freeUndoConsumed added in-place (defaults on read).
+ * schemaVersion 3 = Campaign v2 fields + daily + statistics + achievements notify + settings.
+ * schemaVersion 2 = migration input only (Campaign v2 + mastery stars).
  * Storage key stays `numbermatch.persist.v1` (schema lives inside the blob).
  */
 
 import type { BoardState, CellValue } from '../game/core'
 import type { CampaignDensity, DifficultyProfile } from '../game/generator'
 import type { StarCount } from '../game/stars'
+import type { PersistedDailyState } from '../daily/types'
 
 /** Stable AsyncStorage key — schema evolves inside the blob, not the key. */
 export const STORAGE_KEY = 'numbermatch.persist.v1' as const
@@ -17,7 +18,9 @@ export const STORAGE_KEY = 'numbermatch.persist.v1' as const
 export const PERSIST_HISTORY_BOUND = 64 as const
 
 /** Current on-disk schema. */
-export const PERSIST_SCHEMA_VERSION = 2 as const
+export const PERSIST_SCHEMA_VERSION = 3 as const
+
+export type ThemePreference = 'system' | 'light' | 'dark'
 
 export type PersistedSessionPurpose = 'progression' | 'replay'
 export type PersistedSessionStatus = 'in_progress' | 'completed'
@@ -40,6 +43,18 @@ export interface PersistedCountersV1 {
 	readonly matchesRemoved: number
 	readonly appendActions: number
 	readonly undoActions: number
+}
+
+/** Lifetime gameplay counters (all modes). */
+export interface PersistedStatistics {
+	readonly pairsRemoved: number
+	readonly appendActions: number
+	readonly hintsDelivered: number
+	readonly undoActions: number
+}
+
+export interface PersistedSettings {
+	readonly themePreference: ThemePreference
 }
 
 /**
@@ -89,7 +104,7 @@ export interface PersistedRootV1 {
 }
 
 /**
- * Current on-disk root document (Campaign v2 + stars).
+ * Schema v2 root (Campaign v2 + stars) — migration input only.
  */
 export interface PersistedRootV2 {
 	readonly schemaVersion: 2
@@ -106,7 +121,25 @@ export interface PersistedRootV2 {
 	readonly activeSession: PersistedActiveSession | null
 }
 
-export type PersistedRoot = PersistedRootV2
+/**
+ * Current on-disk root document (schema v3).
+ */
+export interface PersistedRootV3 {
+	readonly schemaVersion: 3
+	readonly campaignVersion: 2
+	readonly revision: number
+	readonly trainingCompleted: boolean
+	readonly highestCompletedLevel: number
+	readonly bestStars: readonly StarCount[]
+	readonly activeSession: PersistedActiveSession | null
+	readonly daily: PersistedDailyState
+	readonly statistics: PersistedStatistics
+	/** Achievement ids whose unlock toast was already shown. */
+	readonly achievementNotifiedIds: readonly string[]
+	readonly settings: PersistedSettings
+}
+
+export type PersistedRoot = PersistedRootV3
 
 /** @deprecated Alias kept for gradual rename — same as PersistedRootV2. */
 export type PersistedRootV1Compat = PersistedRootV2

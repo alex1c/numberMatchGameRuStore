@@ -15,6 +15,7 @@ export type AppRouteName =
 	| 'settings'
 	| 'training'
 	| 'about'
+	| 'rules'
 	/** DEV-only Density Lab — never used in production builds. */
 	| 'densityLab'
 
@@ -34,7 +35,7 @@ export function resolveBackTarget(stack: readonly AppRoute[]): AppRouteName | nu
 	if (!top || top.name === 'home') {
 		return null
 	}
-	if (top.name === 'about') {
+	if (top.name === 'about' || top.name === 'rules') {
 		const previous = stack[stack.length - 2]
 		return previous?.name ?? 'home'
 	}
@@ -105,6 +106,8 @@ export function routeToBannerPlacement(
 			return 'settings'
 		case 'about':
 			return 'about'
+		case 'rules':
+			return 'settings'
 		case 'training':
 			return 'training'
 		case 'game':
