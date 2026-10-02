@@ -128,6 +128,12 @@ export class PersistRepository {
 	private root: PersistedRootV3 | null = null
 	private hydratePromise: Promise<PersistedRootV3> | null = null
 	private readonly queue: PersistWriteQueue
+	/**
+	 * Serializes the ENTIRE root mutation (read → updater → validate →
+	 * revision → write → in-memory update). Concurrent callers must not
+	 * each read the same pre-mutation root (lost-update class of bug).
+	 */
+	private mutationTail: Promise<void> = Promise.resolve()
 
 	constructor(private readonly adapter: StorageAdapter) {
 		this.queue = new PersistWriteQueue(adapter)
@@ -238,8 +244,28 @@ export class PersistRepository {
 
 	/**
 	 * Apply an updater, bump revision, and enqueue a write.
+	 * All mutations run through one critical section so concurrent callers
+	 * each see the result of prior successful updates (no lost writes).
+	 *
+	 * Failure semantics: a failed mutation does not poison the queue —
+	 * later valid mutations still execute against the coherent root.
 	 */
 	async update(
+		updater: (current: PersistedRootV3) => PersistedRootV3,
+	): Promise<{ root: PersistedRootV3; write: WriteQueueResult }> {
+		const run = (): Promise<{ root: PersistedRootV3; write: WriteQueueResult }> =>
+			this.applyRootMutation(updater)
+		const result = this.mutationTail.then(run, run)
+		// Keep the chain alive even when a mutation throws / write fails.
+		this.mutationTail = result.then(
+			() => undefined,
+			() => undefined,
+		)
+		return result
+	}
+
+	/** Single-flight root mutation against the authoritative in-memory root. */
+	private async applyRootMutation(
 		updater: (current: PersistedRootV3) => PersistedRootV3,
 	): Promise<{ root: PersistedRootV3; write: WriteQueueResult }> {
 		const current = await this.hydrate()
@@ -684,8 +710,14 @@ export class PersistRepository {
 	/** Wipe storage and reset to defaults (tests / settings / DEV). */
 	async resetAll(): Promise<PersistedRootV3> {
 		const fresh = createDefaultRoot()
+		// Wait for in-flight mutations so reset is not interleaved mid-write.
+		await this.mutationTail.then(
+			() => undefined,
+			() => undefined,
+		)
 		this.root = fresh
 		this.queue.reset()
+		this.mutationTail = Promise.resolve()
 		await this.adapter.setItem(STORAGE_KEY, JSON.stringify(fresh))
 		return fresh
 	}

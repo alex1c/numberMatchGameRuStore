@@ -433,70 +433,70 @@ export function validateDailyActiveSession(
 	return { ok: true, value: session }
 }
 
-/** Validate daily subtree; missing pieces default to empty daily state. */
+/** Validate daily subtree; missing / partial pieces salvage to safe defaults. */
 export function validateDailyState(raw: unknown): ValidateResult<PersistedDailyState> {
 	const empty = createEmptyDailyState()
 	if (!isObject(raw)) {
 		return { ok: true, value: empty }
 	}
 	if (raw.dailyVersion !== DAILY_VERSION) {
-		return {
-			ok: false,
-			reason: `unsupported dailyVersion: ${String(raw.dailyVersion)}`,
-		}
+		// Unsupported daily catalog — drop daily only; caller keeps Campaign.
+		return { ok: true, value: empty }
 	}
-	if (!isFiniteInt(raw.currentStreak) || raw.currentStreak < 0) {
-		return { ok: false, reason: 'daily.currentStreak invalid' }
-	}
-	if (!isFiniteInt(raw.bestStreak) || raw.bestStreak < 0) {
-		return { ok: false, reason: 'daily.bestStreak invalid' }
-	}
-	if (
-		raw.lastCompletedDateKey !== null &&
-		(typeof raw.lastCompletedDateKey !== 'string' ||
-			!isValidLocalDateKey(raw.lastCompletedDateKey as LocalDateKey))
-	) {
-		return { ok: false, reason: 'daily.lastCompletedDateKey invalid' }
-	}
-	if (!Array.isArray(raw.history)) {
-		return { ok: false, reason: 'daily.history must be an array' }
-	}
+	const currentStreak =
+		isFiniteInt(raw.currentStreak) && raw.currentStreak >= 0
+			? raw.currentStreak
+			: 0
+	const bestStreak =
+		isFiniteInt(raw.bestStreak) && raw.bestStreak >= 0
+			? raw.bestStreak
+			: 0
+	const lastCompletedDateKey =
+		raw.lastCompletedDateKey === null
+			? null
+			: typeof raw.lastCompletedDateKey === 'string' &&
+				  isValidLocalDateKey(raw.lastCompletedDateKey as LocalDateKey)
+				? (raw.lastCompletedDateKey as LocalDateKey)
+				: null
+
 	const history: PersistedDailyState['history'][number][] = []
-	for (let i = 0; i < raw.history.length; i += 1) {
-		const row = raw.history[i]
-		if (!isObject(row)) {
-			return { ok: false, reason: `daily.history[${i}] not an object` }
+	if (Array.isArray(raw.history)) {
+		for (let i = 0; i < raw.history.length; i += 1) {
+			const row = raw.history[i]
+			if (!isObject(row)) {
+				continue
+			}
+			if (
+				typeof row.dateKey !== 'string' ||
+				!isValidLocalDateKey(row.dateKey as LocalDateKey)
+			) {
+				continue
+			}
+			if (
+				typeof row.bestStars !== 'number' ||
+				row.bestStars < 0 ||
+				row.bestStars > 3
+			) {
+				continue
+			}
+			if (!isBoolean(row.completed)) {
+				continue
+			}
+			history.push({
+				dateKey: row.dateKey as LocalDateKey,
+				bestStars: row.bestStars as StarCount,
+				completed: row.completed,
+			})
 		}
-		if (
-			typeof row.dateKey !== 'string' ||
-			!isValidLocalDateKey(row.dateKey as LocalDateKey)
-		) {
-			return { ok: false, reason: `daily.history[${i}].dateKey invalid` }
-		}
-		if (
-			typeof row.bestStars !== 'number' ||
-			row.bestStars < 0 ||
-			row.bestStars > 3
-		) {
-			return { ok: false, reason: `daily.history[${i}].bestStars invalid` }
-		}
-		if (!isBoolean(row.completed)) {
-			return { ok: false, reason: `daily.history[${i}].completed invalid` }
-		}
-		history.push({
-			dateKey: row.dateKey as LocalDateKey,
-			bestStars: row.bestStars as StarCount,
-			completed: row.completed,
-		})
 	}
 
 	let activeDaily: PersistedDailyActiveSession | null = null
 	if (raw.activeDaily !== null && raw.activeDaily !== undefined) {
 		const session = validateDailyActiveSession(raw.activeDaily)
-		if (!session.ok) {
-			return { ok: false, reason: session.reason }
+		if (session.ok) {
+			activeDaily = session.value
 		}
-		activeDaily = session.value
+		// Salvage: drop corrupt activeDaily; keep history/streaks.
 	}
 
 	return {
@@ -504,9 +504,9 @@ export function validateDailyState(raw: unknown): ValidateResult<PersistedDailyS
 		value: {
 			dailyVersion: DAILY_VERSION,
 			history,
-			currentStreak: raw.currentStreak,
-			bestStreak: raw.bestStreak,
-			lastCompletedDateKey: raw.lastCompletedDateKey as LocalDateKey | null,
+			currentStreak,
+			bestStreak,
+			lastCompletedDateKey,
 			activeDaily,
 		},
 	}
@@ -542,10 +542,10 @@ function validateCampaignCore(raw: Record<string, unknown>): ValidateResult<{
 	let activeSession: PersistedActiveSession | null = null
 	if (raw.activeSession !== null && raw.activeSession !== undefined) {
 		const session = validateActiveSession(raw.activeSession)
-		if (!session.ok) {
-			return { ok: false, reason: session.reason }
+		if (session.ok) {
+			activeSession = session.value
 		}
-		activeSession = session.value
+		// Salvage: drop corrupt activeSession; keep frontier/stars/training.
 	}
 
 	const bestStars = starBoardFromRawOrRepair(
@@ -615,10 +615,9 @@ export function validatePersistedRoot(
 		return core
 	}
 
+	// Daily subtree is independently salvageable — never wipe Campaign for it.
 	const daily = validateDailyState(raw.daily)
-	if (!daily.ok) {
-		return { ok: false, reason: daily.reason }
-	}
+	const dailyValue = daily.ok ? daily.value : createEmptyDailyState()
 
 	return {
 		ok: true,
@@ -626,7 +625,7 @@ export function validatePersistedRoot(
 			schemaVersion: PERSIST_SCHEMA_VERSION,
 			campaignVersion: CAMPAIGN_VERSION,
 			...core.value,
-			daily: daily.value,
+			daily: dailyValue,
 			statistics: statisticsFromRawOrDefault(raw.statistics),
 			achievementNotifiedIds: achievementIdsFromRawOrDefault(
 				raw.achievementNotifiedIds,
