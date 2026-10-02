@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useAppState } from '../app'
+import { isScreenshotQaMode } from '../dev/screenshotQaMode'
 import { CAMPAIGN_LEVEL_COUNT } from '../game/campaign'
 import { StarsRow } from '../components/game/StarsRow'
 import type { StarCount } from '../game/stars'
@@ -253,7 +254,10 @@ export function LevelsScreen({ onHome, onOpenGame }: LevelsScreenProps) {
 		[a11yFor, bestStars, cellSize, onPressLevel, resolveState, theme],
 	)
 
-	const bottomPad = insets.bottom + BANNER_SLOT_HEIGHT + spacing.lg
+	const bottomPad =
+		insets.bottom +
+		(isScreenshotQaMode() ? 0 : BANNER_SLOT_HEIGHT) +
+		spacing.lg
 
 	return (
 		<View

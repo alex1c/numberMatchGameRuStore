@@ -24,6 +24,7 @@ import {
 import { trackEvent } from '../analytics'
 import { CAMPAIGN_LEVEL_COUNT, CAMPAIGN_VERSION } from '../game/campaign'
 import { DENSITY_FIXTURES, loadDensityFixture } from '../dev/density'
+import { isScreenshotQaMode } from '../dev/screenshotQaMode'
 import { CompletionOverlay } from '../components/game/CompletionOverlay'
 import { GameControls } from '../components/game/GameControls'
 import { GameHeader } from '../components/game/GameHeader'
@@ -990,7 +991,7 @@ export function GameScreen({
 				onHome={onHome}
 			/>
 
-			{__DEV__ ? (
+			{typeof __DEV__ !== 'undefined' && __DEV__ && !isScreenshotQaMode() ? (
 				<View style={styles.meta} testID="game-dev-meta">
 					<Text style={[styles.metaText, { color: theme.colors.textMuted }]}>
 						{session.identity.profile} · seed {session.identity.seed}
@@ -1017,7 +1018,12 @@ export function GameScreen({
 					session.interactionLocked || session.hintBusy || helpAdBusy
 				}
 				scrollToEndToken={scrollToEndToken}
-				showDevCoords={__DEV__ && showDevCoords}
+				showDevCoords={
+					typeof __DEV__ !== 'undefined' &&
+					__DEV__ &&
+					!isScreenshotQaMode() &&
+					showDevCoords
+				}
 			/>
 
 			<Text
@@ -1040,7 +1046,7 @@ export function GameScreen({
 				/>
 			) : null}
 
-			{__DEV__ ? (
+			{typeof __DEV__ !== 'undefined' && __DEV__ && !isScreenshotQaMode() ? (
 				<Pressable
 					onPress={() => setShowDevCoords((v) => !v)}
 					style={styles.devToggle}

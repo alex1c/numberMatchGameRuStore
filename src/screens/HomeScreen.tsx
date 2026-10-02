@@ -29,6 +29,7 @@ import { useGameSession } from '../game/session/GameSessionContext'
 import { localDateKey } from '../daily'
 import { strings } from '../i18n/strings.ru'
 import { APP_DISPLAY_NAME_SHORT } from '../about/config'
+import { isScreenshotQaMode } from '../dev/screenshotQaMode'
 import { spacing, typography, useTheme } from '../theme'
 import type { AppRouteName } from '../navigation'
 
@@ -292,7 +293,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 				</Pressable>
 			))}
 
-			{typeof __DEV__ !== 'undefined' && __DEV__ ? (
+			{typeof __DEV__ !== 'undefined' && __DEV__ && !isScreenshotQaMode() ? (
 				<View style={styles.devBlock} testID="dev-section">
 					<Text style={[styles.section, { color: theme.colors.accent }]}>
 						{strings.devSection}
