@@ -134,6 +134,11 @@ interface AppStateContextValue {
 	readonly commitDailyCompletion: (
 		session: GameSessionState,
 	) => Promise<AchievementNotifyContext | null>
+	/**
+	 * Last Daily commit outcome (accepted / expired / rejected).
+	 * GameScreen gates the completion overlay on accepted only.
+	 */
+	readonly lastDailyCompletionStatus: 'accepted' | 'expired' | 'rejected' | null
 	readonly buildRestoredDailySession: () => GameSessionState | null
 	readonly getDailySummary: (todayKey: LocalDateKey) => DailySummary
 	readonly discardStaleDailyIfDateChanged: (
@@ -515,35 +520,36 @@ export function AppStateProvider({
 		[repository],
 	)
 
+	const [lastDailyCompletionStatus, setLastDailyCompletionStatus] = useState<
+		'accepted' | 'expired' | 'rejected' | null
+	>(null)
+
 	const commitDailyCompletion = useCallback(
 		async (
 			session: GameSessionState,
 		): Promise<AchievementNotifyContext | null> => {
 			if (completionInFlight.current || sessionSource !== 'daily') {
+				setLastDailyCompletionStatus('rejected')
 				return null
 			}
 			const active = repository.getRoot().daily.activeDaily
 			if (!active) {
+				setLastDailyCompletionStatus('rejected')
 				return null
 			}
-			// Device-local calendar is authoritative — never complete yesterday.
-			const todayKey = currentLocalDateKey()
-			if (active.dateKey !== todayKey) {
-				const next = await repository.discardStaleDailyActiveIfDateChanged(
-					todayKey,
-				)
-				setRoot(next)
-				setSessionSource('none')
-				return null
-			}
+			// Capture identity before enqueue — authoritative re-check is inside
+			// the repository mutation queue (handles midnight while waiting).
+			const attemptedDateKey = active.dateKey
+			const attemptedFingerprint = active.fingerprint
 			completionInFlight.current = true
 			try {
 				const stars = starsFromAttempt({
 					usedHint: session.usedHint,
 					usedUndo: session.usedUndo,
 				})
-				let next = await repository.commitDailyCompletion({
-					dateKey: active.dateKey,
+				const result = await repository.commitDailyCompletion({
+					dateKey: attemptedDateKey,
+					fingerprint: attemptedFingerprint,
 					stars,
 					counters: session.counters,
 					usedHint: session.usedHint,
@@ -551,14 +557,22 @@ export function AppStateProvider({
 					freeHintConsumed: session.freeHintConsumed,
 					freeUndoConsumed: session.freeUndoConsumed,
 				})
+				setRoot(result.root)
+				setLastDailyCompletionStatus(result.status)
+				if (result.status !== 'accepted') {
+					setSessionSource('none')
+					return null
+				}
 				// Lifetime counters are incremented during play via recordGameplayStats —
 				// do not re-add session totals here (would double-count).
-				setRoot(next)
-				const unlocks = evaluateAchievementUnlocks(next)
+				const unlocks = evaluateAchievementUnlocks(result.root)
 				setSessionSource('none')
 				return {
 					...unlocks,
-					dailyStreakAfter: getActiveCurrentStreak(next.daily, active.dateKey),
+					dailyStreakAfter: getActiveCurrentStreak(
+						result.root.daily,
+						result.dateKey,
+					),
 				}
 			} finally {
 				completionInFlight.current = false
@@ -745,6 +759,7 @@ export function AppStateProvider({
 			commitReplayCompletion,
 			syncDailyFromGameplay,
 			commitDailyCompletion,
+			lastDailyCompletionStatus,
 			buildRestoredDailySession,
 			getDailySummary,
 			discardStaleDailyIfDateChanged,
@@ -776,6 +791,7 @@ export function AppStateProvider({
 			commitReplayCompletion,
 			syncDailyFromGameplay,
 			commitDailyCompletion,
+			lastDailyCompletionStatus,
 			buildRestoredDailySession,
 			getDailySummary,
 			discardStaleDailyIfDateChanged,

@@ -65,6 +65,7 @@ export {
 	buildActiveSession,
 	buildDailyActiveSession,
 } from './repository'
+export type { DailyCompletionCommitResult } from './repository'
 
 export {
 	parseStarBoard,

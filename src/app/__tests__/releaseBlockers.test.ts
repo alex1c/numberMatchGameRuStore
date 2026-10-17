@@ -395,7 +395,7 @@ describe('P2-3 Daily completion snapshot contract', () => {
 			showDailyReplay: true,
 		}
 
-		await repo.commitDailyCompletion({
+		const result = await repo.commitDailyCompletion({
 			dateKey: today,
 			stars: attemptStars,
 			counters: { matchesRemoved: 1, appendActions: 0, undoActions: 0 },
@@ -403,6 +403,7 @@ describe('P2-3 Daily completion snapshot contract', () => {
 			usedUndo: false,
 		})
 
+		expect(result.status).toBe('accepted')
 		expect(repo.getRoot().daily.activeDaily).toBeNull()
 		// Snapshot is independent of cleared activeDaily.
 		expect(snapshot.mode).toBe('daily')

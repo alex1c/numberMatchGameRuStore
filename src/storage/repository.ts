@@ -46,6 +46,29 @@ export interface SessionValidationResult {
 }
 
 /**
+ * Structured Daily completion outcome from the serialized mutation queue.
+ * Expired / rejected must never award history, streak, or stars.
+ */
+export type DailyCompletionCommitResult =
+	| {
+			readonly status: 'accepted'
+			readonly root: PersistedRootV3
+			readonly stars: StarCount
+			readonly dateKey: LocalDateKey
+	  }
+	| {
+			readonly status: 'expired'
+			readonly root: PersistedRootV3
+			readonly attemptedDateKey: LocalDateKey
+			readonly todayKey: LocalDateKey
+	  }
+	| {
+			readonly status: 'rejected'
+			readonly root: PersistedRootV3
+			readonly reason: 'no_active' | 'identity_mismatch' | 'not_eligible'
+	  }
+
+/**
  * Semantic checks for an active session against campaign frontier + catalog.
  * Invalid sessions are dropped on hydrate while preserving highestCompletedLevel.
  */
@@ -562,8 +585,13 @@ export class PersistRepository {
 	}
 
 	/**
-	 * Record a finished daily puzzle: streak/history via recordDailyCompletion,
-	 * clear activeDaily, optional star override from attempt flags.
+	 * Record a finished daily puzzle inside the serialized mutation queue.
+	 *
+	 * Authoritative date / identity / eligibility checks run INSIDE the queued
+	 * updater (not before enqueue) so a midnight rollover while waiting behind
+	 * another write cannot commit yesterday's Daily.
+	 *
+	 * Expired / rejected outcomes never write history, streak, or stars.
 	 */
 	async commitDailyCompletion(input: {
 		readonly dateKey: LocalDateKey
@@ -573,21 +601,109 @@ export class PersistRepository {
 		readonly usedUndo: boolean
 		readonly freeHintConsumed?: boolean
 		readonly freeUndoConsumed?: boolean
-	}): Promise<PersistedRootV3> {
+		/** Optional fingerprint to match activeDaily (GameScreen attempt). */
+		readonly fingerprint?: string
+	}): Promise<DailyCompletionCommitResult> {
 		const stars =
 			input.stars ??
 			starsFromAttempt({
 				usedHint: input.usedHint,
 				usedUndo: input.usedUndo,
 			})
+
+		// Holder avoids TS control-flow narrowing issues for assignments inside
+		// the mutation callback.
+		const holder: {
+			decision: DailyCompletionCommitResult | null
+		} = { decision: null }
+
 		const { root } = await this.update((current) => {
+			// Clock is injectable via __setLocalNowForTests / currentLocalDateKey.
+			const todayKey = currentLocalDateKey()
+			const active = current.daily.activeDaily
+
+			if (!active) {
+				holder.decision = {
+					status: 'rejected',
+					root: current,
+					reason: 'no_active',
+				}
+				return current
+			}
+
+			if (active.dateKey !== input.dateKey) {
+				holder.decision = {
+					status: 'rejected',
+					root: current,
+					reason: 'identity_mismatch',
+				}
+				// Drop mismatched active so it cannot be completed later.
+				return {
+					...current,
+					daily: { ...current.daily, activeDaily: null },
+				}
+			}
+
+			if (
+				input.fingerprint !== undefined &&
+				active.fingerprint !== input.fingerprint
+			) {
+				holder.decision = {
+					status: 'rejected',
+					root: current,
+					reason: 'identity_mismatch',
+				}
+				return {
+					...current,
+					daily: { ...current.daily, activeDaily: null },
+				}
+			}
+
+			if (active.dateKey !== todayKey) {
+				holder.decision = {
+					status: 'expired',
+					root: current,
+					attemptedDateKey: active.dateKey,
+					todayKey,
+				}
+				// Clear stale active without awarding completion.
+				return {
+					...current,
+					daily: { ...current.daily, activeDaily: null },
+				}
+			}
+
 			const daily = recordDailyCompletion(current.daily, input.dateKey, stars)
-			return {
+			const next: PersistedRootV3 = {
 				...current,
 				daily: { ...daily, activeDaily: null },
 			}
+			holder.decision = {
+				status: 'accepted',
+				root: next,
+				stars,
+				dateKey: input.dateKey,
+			}
+			return next
 		})
-		return root
+
+		const decision = holder.decision
+		if (!decision) {
+			return {
+				status: 'rejected',
+				root,
+				reason: 'not_eligible',
+			}
+		}
+
+		// Attach the post-write root so callers see revision / cleared active.
+		if (decision.status === 'accepted') {
+			return { ...decision, root }
+		}
+		if (decision.status === 'expired') {
+			return { ...decision, root }
+		}
+		return { ...decision, root }
 	}
 
 	/** Increment lifetime statistics counters (clamped non-negative). */
