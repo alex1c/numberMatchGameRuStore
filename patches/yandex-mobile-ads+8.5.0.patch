@@ -1,0 +1,143 @@
+diff --git a/node_modules/yandex-mobile-ads/android/src/main/java/com/yandexmobileads/rewarded/YandexRewardedAdModule.kt b/node_modules/yandex-mobile-ads/android/src/main/java/com/yandexmobileads/rewarded/YandexRewardedAdModule.kt
+index 91faadb..fd85ed4 100644
+--- a/node_modules/yandex-mobile-ads/android/src/main/java/com/yandexmobileads/rewarded/YandexRewardedAdModule.kt
++++ b/node_modules/yandex-mobile-ads/android/src/main/java/com/yandexmobileads/rewarded/YandexRewardedAdModule.kt
+@@ -104,6 +104,11 @@ internal class YandexRewardedAdModule(
+         }
+     }
+ 
++    /**
++     * Public bridge so JS can release a loaded-but-unshown rewarded ad.
++     * ForestMusic / Number Match patch — stock SDK kept deleteAd internal-only.
++     */
++    @ReactMethod
+     fun deleteAd(id: String) {
+         val eventName = eventNameProvider.eventName(
+             Constants.AdType.REWARDED,
+@@ -129,13 +134,18 @@ internal class YandexRewardedAdModule(
+         }
+ 
+         override fun onAdLoaded(rewarded: RewardedAd) {
++            // If cancelLoading cleared the waiter, do not retain the native ad.
++            val promise = loadPromises[loaderId]?.poll()
++            if (promise == null) {
++                return
++            }
+             val id = adsStorage.put(rewarded)
+             rewarded.setAdEventListener(RNRewardedAdEventListener(id))
+             val result = mapOf(
+                 Constants.Key.AD_ID to id,
+                 Constants.Key.AD_INFO to adInfoMapper.map(rewarded.adInfo),
+             )
+-            loadPromises[loaderId]?.poll()?.resolve(Arguments.makeNativeMap(result))
++            promise.resolve(Arguments.makeNativeMap(result))
+         }
+     }
+ 
+diff --git a/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.m b/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.m
+index 11ed519..4bb1e9a 100644
+--- a/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.m
++++ b/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.m
+@@ -19,6 +19,8 @@ RCT_EXTERN_METHOD(showAd: (NSString *)adObjectId
+                   resolver:(RCTPromiseResolveBlock)resolve
+                   rejecter:(RCTPromiseRejectBlock)reject)
+ 
++RCT_EXTERN_METHOD(deleteAd: (NSString *)adObjectId)
++
+ @end
+ 
+ #endif
+diff --git a/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.swift b/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.swift
+index 0203378..f52c435 100644
+--- a/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.swift
++++ b/node_modules/yandex-mobile-ads/ios/Rewarded/YandexRewardedAdModule.swift
+@@ -109,9 +109,16 @@ class YandexRewardedAdModule: NSObject {
+         }
+     }
+ 
+-    // MARK: - Private
++    // MARK: - Disposal
+ 
+-    private func deleteAd(id: String) {
++    /// Public bridge so JS can release a loaded-but-unshown rewarded ad.
++    /// ForestMusic / Number Match patch — stock SDK kept deleteAd private.
++    @objc
++    func deleteAd(_ adObjectId: String) {
++        deleteAd(id: adObjectId)
++    }
++
++    func deleteAd(id: String) {
+         let eventName = eventNameProvider.eventName(
+             adType: .rewarded,
+             for: Constants.EventName.onAdDeleted
+diff --git a/node_modules/yandex-mobile-ads/lib/commonjs/rewarded/RewardedAd.js b/node_modules/yandex-mobile-ads/lib/commonjs/rewarded/RewardedAd.js
+index 699a2b0..f3538d0 100644
+--- a/node_modules/yandex-mobile-ads/lib/commonjs/rewarded/RewardedAd.js
++++ b/node_modules/yandex-mobile-ads/lib/commonjs/rewarded/RewardedAd.js
+@@ -151,9 +151,17 @@ class RewardedAd {
+     }
+   }
+   delete() {
++    const adId = this._id;
+     this._subscriptions.forEach(sub => sub.remove());
+     this._subscriptions.clear();
+     this._id = '';
++    if (adId !== '') {
++      try {
++        _YandexMobileAdsModule.default.YandexRewardedAdModule.deleteAd(adId);
++      } catch (_e) {
++        // Native bridge may be unavailable in Jest / unsupported platforms.
++      }
++    }
+   }
+   createListenerFunction(action) {
+     return event => {
+diff --git a/node_modules/yandex-mobile-ads/lib/module/rewarded/RewardedAd.js b/node_modules/yandex-mobile-ads/lib/module/rewarded/RewardedAd.js
+index ad4f69d..fa2ff74 100644
+--- a/node_modules/yandex-mobile-ads/lib/module/rewarded/RewardedAd.js
++++ b/node_modules/yandex-mobile-ads/lib/module/rewarded/RewardedAd.js
+@@ -145,9 +145,17 @@ export class RewardedAd {
+     }
+   }
+   delete() {
++    const adId = this._id;
+     this._subscriptions.forEach(sub => sub.remove());
+     this._subscriptions.clear();
+     this._id = '';
++    if (adId !== '') {
++      try {
++        YandexMobileAdsModule.YandexRewardedAdModule.deleteAd(adId);
++      } catch (_e) {
++        // Native bridge may be unavailable in Jest / unsupported platforms.
++      }
++    }
+   }
+   createListenerFunction(action) {
+     return event => {
+diff --git a/node_modules/yandex-mobile-ads/src/rewarded/RewardedAd.ts b/node_modules/yandex-mobile-ads/src/rewarded/RewardedAd.ts
+index d9986de..33c2a44 100644
+--- a/node_modules/yandex-mobile-ads/src/rewarded/RewardedAd.ts
++++ b/node_modules/yandex-mobile-ads/src/rewarded/RewardedAd.ts
+@@ -186,10 +186,22 @@ export class RewardedAd {
+         }
+     }
+ 
++    /**
++     * Dispose JS listeners and ask native adsStorage to drop this ad.
++     * ForestMusic / Number Match patch: stock SDK only cleared JS state.
++     */
+     private delete() {
++        const adId = this._id;
+         this._subscriptions.forEach((sub) => sub.remove());
+         this._subscriptions.clear();
+         this._id = '';
++        if (adId !== '') {
++            try {
++                YandexMobileAdsModule.YandexRewardedAdModule.deleteAd(adId);
++            } catch {
++                // Native bridge may be unavailable in Jest / unsupported platforms.
++            }
++        }
+     }
+ 
+     private createListenerFunction(action: Function) {

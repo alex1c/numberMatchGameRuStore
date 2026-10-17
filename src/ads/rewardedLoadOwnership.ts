@@ -1,9 +1,16 @@
 /**
  * Owns a rewarded load Promise so timeout / cancel / stale always dispose
- * a late-arriving native ad exactly once. Never leave orphan listeners.
+ * a late-arriving native ad exactly once. Never leave orphan listeners or
+ * unhandled rejections. Disposal goes through disposeRewardedAdNative so
+ * native adsStorage release is invoked when an ad id is present.
  */
 
-export interface DisposableRewardedAd {
+import {
+	disposeRewardedAdNative,
+	type DisposableRewardedWithId,
+} from './rewardedNativeDisposal'
+
+export interface DisposableRewardedAd extends DisposableRewardedWithId {
 	readonly delete: () => void
 	show: () => Promise<void>
 	onRewarded: ((reward?: unknown) => void) | null
@@ -37,6 +44,7 @@ export interface OwnedRewardedLoadOptions {
 /**
  * Race load vs timeout. On timeout/abandon, cancelLoading best-effort and
  * attach a continuation that deletes any late-resolved ad exactly once.
+ * Both fulfillment and rejection of the load Promise are always handled.
  */
 export async function loadRewardedAdOwned(
 	options: OwnedRewardedLoadOptions,
@@ -55,23 +63,24 @@ export async function loadRewardedAdOwned(
 			return
 		}
 		disposed = true
-		try {
-			ad.onRewarded = null
-			ad.onAdDismissed = null
-			ad.onAdFailedToShow = null
-		} catch {
-			// ignore listener clear failures
-		}
-		try {
-			ad.delete()
-		} catch {
-			// ignore native delete failures
-		}
+		disposeRewardedAdNative(ad)
 	}
 
 	const disposeLateOrUnused = () => {
 		disposeOnce(ownedAd)
 		ownedAd = null
+	}
+
+	/** Always settle — never leave an unhandledRejection on loadPromise. */
+	const attachLateDisposal = () => {
+		void loadPromise.then(
+			(late) => {
+				if (late) {
+					disposeOnce(late)
+				}
+			},
+			() => undefined,
+		)
 	}
 
 	let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -113,12 +122,7 @@ export async function loadRewardedAdOwned(
 
 		if (timedOut || options.isAbandoned?.()) {
 			cancelled = options.isAbandoned?.() === true && !timedOut
-			// Ensure late load continues to dispose (loadPromise continuation).
-			void loadPromise.then((late) => {
-				if (late) {
-					disposeOnce(late)
-				}
-			})
+			attachLateDisposal()
 			return {
 				ad: null,
 				timedOut,
@@ -149,11 +153,8 @@ export async function loadRewardedAdOwned(
 			timeoutId = null
 		}
 		finished = true
-		void loadPromise.then((late) => {
-			if (late) {
-				disposeOnce(late)
-			}
-		})
+		// Handle both late resolve and the already-rejected loadPromise.
+		attachLateDisposal()
 		throw err
 	}
 }

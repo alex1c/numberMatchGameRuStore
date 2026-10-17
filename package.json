@@ -18,7 +18,8 @@
     "campaign:build": "tsx src/game/campaign/builderCli.ts",
     "campaign:audit": "tsx src/game/campaign/auditCli.ts",
     "daily:audit": "tsx src/daily/auditCli.ts",
-    "android:qa": "powershell -ExecutionPolicy Bypass -File ./scripts/android/android-device-qa.ps1"
+    "android:qa": "powershell -ExecutionPolicy Bypass -File ./scripts/android/android-device-qa.ps1",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@appmetrica/react-native-analytics": "^4.2.0",
@@ -40,6 +41,7 @@
     "eslint-config-expo": "~57.0.2",
     "jest": "~29.7.0",
     "jest-expo": "~57.0.5",
+    "patch-package": "^8.0.1",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   }
