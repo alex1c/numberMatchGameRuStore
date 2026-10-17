@@ -46,6 +46,7 @@ import { starsFromAttempt, type StarCount } from '../game/stars'
 import { useGameSession } from '../game/session/GameSessionContext'
 import type { HintOutcome } from '../game/session/hintRequest'
 import { spacing, typography, useTheme } from '../theme'
+import { resolveCompletionOverlayGate } from './completionOverlayGate'
 import {
 	beginTransition,
 	bumpScreenGeneration,
@@ -111,6 +112,7 @@ export function GameScreen({
 		startSession,
 		attemptId,
 		getAttemptId,
+		clearSession,
 	} = useGameSession()
 	const {
 		activeSession,
@@ -141,6 +143,8 @@ export function GameScreen({
 	/** Survives activeDaily clear so Daily completion overlay keeps mode/stars/streak. */
 	const [dailyCompletionSnapshot, setDailyCompletionSnapshot] =
 		useState<DailyCompletionSnapshot | null>(null)
+	/** Daily overlay is gated on accepted commit — never show on pending/reject. */
+	const [dailyCommitAccepted, setDailyCommitAccepted] = useState(false)
 	const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const completionCommitted = useRef<string | null>(null)
@@ -211,7 +215,9 @@ export function GameScreen({
 	const isDaily = sessionSource === 'daily' && daily.activeDaily !== null
 	/** Completion UI may still be Daily after persisted activeDaily was cleared. */
 	const isDailyCompletion =
-		dailyCompletionSnapshot !== null && session?.completed === true
+		dailyCommitAccepted &&
+		dailyCompletionSnapshot !== null &&
+		session?.completed === true
 	const showingAsDaily = isDaily || isDailyCompletion
 	const dailyDateKey =
 		daily.activeDaily?.dateKey ?? dailyCompletionSnapshot?.dateKey ?? null
@@ -566,7 +572,7 @@ export function GameScreen({
 	])
 
 	// Commit daily completion + analytics + achievement toasts.
-	// Snapshot becomes authoritative ONLY after commit accepts today's date.
+	// Snapshot / overlay become authoritative ONLY after commit accepts.
 	useEffect(() => {
 		if (!session?.completed || !isDaily || !dailyDateKey) {
 			return
@@ -576,6 +582,8 @@ export function GameScreen({
 			return
 		}
 		completionCommitted.current = commitKey
+		setDailyCommitAccepted(false)
+		setDailyCompletionSnapshot(null)
 		const attemptStars = starsFromAttempt({
 			usedHint: session.usedHint,
 			usedUndo: session.usedUndo,
@@ -589,13 +597,14 @@ export function GameScreen({
 			streakAfter: getDailySummary(dailyDateKey).activeStreak,
 		}
 		void (async () => {
-			// Re-check calendar immediately before commit (midnight race).
-			const today = currentLocalDateKey()
-			if (candidate.dateKey !== today) {
+			const unlocks = await commitDailyCompletion(session)
+			if (!unlocks) {
+				// Expired / rejected — no success overlay, no Restart of stale attempt.
 				completionCommitted.current = null
+				setDailyCommitAccepted(false)
 				setDailyCompletionSnapshot(null)
-				await discardStaleDailyIfDateChanged(today)
 				clearSessionSource()
+				clearSession()
 				Alert.alert(strings.dailyExpiredTitle, strings.dailyExpiredBody, [
 					{
 						text: strings.dailyExpiredOpenToday,
@@ -606,21 +615,12 @@ export function GameScreen({
 				])
 				return
 			}
-			const unlocks = await commitDailyCompletion(session)
-			if (!unlocks) {
-				// Commit rejected (expiry / no active) — no false success overlay.
-				completionCommitted.current = null
-				setDailyCompletionSnapshot(null)
-				if (!ensureDailyCurrent()) {
-					return
-				}
-				return
-			}
 			const streakAfter = unlocks.dailyStreakAfter ?? candidate.streakAfter
 			setDailyCompletionSnapshot({
 				...candidate,
 				streakAfter,
 			})
+			setDailyCommitAccepted(true)
 			if (levelCompletedAnalyticsKey.current !== commitKey) {
 				levelCompletedAnalyticsKey.current = commitKey
 				trackEvent('daily_completed', {
@@ -637,11 +637,10 @@ export function GameScreen({
 			}
 		})()
 	}, [
+		clearSession,
 		clearSessionSource,
 		commitDailyCompletion,
 		dailyDateKey,
-		discardStaleDailyIfDateChanged,
-		ensureDailyCurrent,
 		getDailySummary,
 		isDaily,
 		onHome,
@@ -1266,15 +1265,27 @@ export function GameScreen({
 	const completionKey = session.completed
 		? `${session.identity.fingerprint}:${session.counters.matchesRemoved}:${session.counters.undoActions}`
 		: null
-	const showCompletion =
-		completionKey !== null && completionKey !== dismissedCompletionKey
+	const overlayGate = resolveCompletionOverlayGate({
+		sessionCompleted: session.completed,
+		completionKey,
+		dismissedCompletionKey,
+		isDaily,
+		isDailyCompletion,
+		hasDailySnapshot: dailyCompletionSnapshot !== null,
+		isCampaign,
+		isDensityLab,
+		campaignPurpose,
+	})
+	const showCompletion = overlayGate.showCompletion
+	const showingAsDailyUi = overlayGate.showingAsDaily
+	const completionMode = overlayGate.mode
 
 	const undoAllowedAfterCompletion =
-		session.undoAfterCompletion !== false && !isCampaign && !showingAsDaily
+		session.undoAfterCompletion !== false && !isCampaign && !showingAsDailyUi
 
 	const headerTitle = isCampaign && campaignLevel
 		? strings.levelHeader(campaignLevel)
-		: showingAsDaily && dailyDateKey
+		: showingAsDailyUi && dailyDateKey
 			? strings.dailyPuzzleHeader
 			: isDensityLab && densityMeta
 				? densityMeta.label
@@ -1282,7 +1293,7 @@ export function GameScreen({
 	// Campaign: level + optional difficulty only — never seed/fingerprint.
 	const headerSubtitle = isCampaign
 		? strings.profileLabel(session.identity.profile)
-		: showingAsDaily && dailyDateKey
+		: showingAsDailyUi && dailyDateKey
 			? formatLocalDateRu(dailyDateKey)
 			: isDensityLab
 				? session.identity.label
@@ -1298,17 +1309,9 @@ export function GameScreen({
 	const completionTitle =
 		isCampaign && campaignLevel
 			? strings.levelCompletedTitle(campaignLevel)
-			: showingAsDaily
+			: showingAsDailyUi
 				? strings.dailyPuzzleHeader
 				: strings.completedTitle
-
-	const completionMode = showingAsDaily
-		? 'daily'
-		: !isCampaign
-			? 'dev'
-			: campaignPurpose === 'replay'
-				? 'campaign_replay'
-				: 'campaign_progression'
 
 	const dailyStreakNote =
 		showingAsDaily && dailyDateKey
@@ -1461,7 +1464,7 @@ export function GameScreen({
 					undoAllowedAfterCompletion && session.history.length > 0
 				}
 				onUndo={() => dispatch({ type: 'UNDO' })}
-				showRestart={!isCampaign && !isDensityLab && !showingAsDaily}
+				showRestart={overlayGate.showRestart}
 				onRestart={confirmRestart}
 			/>
 		</View>
