@@ -131,7 +131,6 @@ export function GameScreen({
 		recordGameplayStats,
 		discardStaleDailyIfDateChanged,
 		clearSessionSource,
-		getSessionSource,
 	} = useAppState()
 
 	const [dismissedCompletionKey, setDismissedCompletionKey] = useState<
@@ -146,9 +145,24 @@ export function GameScreen({
 		useState<DailyCompletionSnapshot | null>(null)
 	/** Daily overlay is gated on accepted commit — never show on pending/reject. */
 	const [dailyCommitAccepted, setDailyCommitAccepted] = useState(false)
+	/**
+	 * Recoverable Daily persist failure — explicit Retry only (no effect loops).
+	 * Keyed to originating attempt + completion identity.
+	 */
+	const [dailyPersistError, setDailyPersistError] = useState<{
+		readonly commitKey: string
+		readonly attemptId: number
+		readonly dateKey: LocalDateKey
+		readonly fingerprint: string
+	} | null>(null)
+	/** Disables Retry while an explicit retry request is in flight. */
+	const [dailyRetryBusy, setDailyRetryBusy] = useState(false)
 	const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+	/** One auto (or in-flight) Daily completion request per commitKey. */
 	const completionCommitted = useRef<string | null>(null)
+	/** True while an explicit Retry request is in flight (sync guard). */
+	const dailyRetryPendingRef = useRef(false)
 	const levelStartedKey = useRef<string | null>(null)
 	const levelCompletedAnalyticsKey = useRef<string | null>(null)
 	const lastSyncedKey = useRef<string | null>(null)
@@ -572,65 +586,46 @@ export function GameScreen({
 		session,
 	])
 
-	// Commit daily completion + analytics + achievement toasts.
-	// Snapshot / overlay become authoritative ONLY after commit accepts.
-	// Bound to originating attemptId + Daily source so a late settle cannot
-	// clear/navigate Campaign after the user switches away.
-	useEffect(() => {
-		if (!session?.completed || !isDaily || !dailyDateKey) {
-			return
-		}
-		const commitKey = `daily:${dailyDateKey}:${session.identity.fingerprint}`
-		if (completionCommitted.current === commitKey) {
-			return
-		}
-		completionCommitted.current = commitKey
-		setDailyCommitAccepted(false)
-		setDailyCompletionSnapshot(null)
-		const owningAttemptId = getAttemptId()
-		const owningDateKey = dailyDateKey
-		const owningFingerprint = session.identity.fingerprint
-		const attemptStars = starsFromAttempt({
-			usedHint: session.usedHint,
-			usedUndo: session.usedUndo,
-		})
-		const candidate: DailyCompletionSnapshot = {
-			dateKey: dailyDateKey,
-			fingerprint: session.identity.fingerprint,
-			attemptStars,
-			usedHint: session.usedHint,
-			usedUndo: session.usedUndo,
-			streakAfter: getDailySummary(dailyDateKey).activeStreak,
-		}
-		void (async () => {
-			const result = await commitDailyCompletion(session, {
-				attemptId: owningAttemptId,
-				dateKey: owningDateKey,
-				fingerprint: owningFingerprint,
-				getAttemptId,
-			})
-
-			const stillOwnsRuntime =
-				getAttemptId() === owningAttemptId &&
-				getSessionSource() === 'daily'
-
-			if (result.status === 'stale_runtime' || !stillOwnsRuntime) {
-				// Campaign (or another attempt) owns the live session — ignore UI.
+	/**
+	 * Apply a Daily completion UI result for the originating attempt only.
+	 * Ownership is attemptId-scoped: provider may set sessionSource to `none`
+	 * for this same attempt (accepted/expired) — that is not stale.
+	 */
+	const applyDailyCompletionUiResult = useCallback(
+		(
+			result: Awaited<ReturnType<typeof commitDailyCompletion>>,
+			ctx: {
+				readonly owningAttemptId: number
+				readonly commitKey: string
+				readonly candidate: DailyCompletionSnapshot
+				readonly profile: string
+			},
+		) => {
+			const stillOwnsAttempt = getAttemptId() === ctx.owningAttemptId
+			if (result.status === 'stale_runtime' || !stillOwnsAttempt) {
+				// Newer Campaign / Daily owns the live session — ignore UI.
 				return
 			}
 
 			if (result.status === 'write_failed') {
-				// Keep recoverable Daily attempt; allow a later retry.
-				completionCommitted.current = null
+				// Keep board + persisted attempt; no success overlay; explicit Retry.
 				setDailyCommitAccepted(false)
 				setDailyCompletionSnapshot(null)
+				setDailyPersistError({
+					commitKey: ctx.commitKey,
+					attemptId: ctx.owningAttemptId,
+					dateKey: ctx.candidate.dateKey,
+					fingerprint: ctx.candidate.fingerprint,
+				})
 				return
 			}
 
+			setDailyPersistError(null)
+
 			if (result.status === 'expired' || result.status === 'rejected') {
-				completionCommitted.current = null
 				setDailyCommitAccepted(false)
 				setDailyCompletionSnapshot(null)
+				// Provider already cleared source for this attempt; clear runtime.
 				clearSessionSource()
 				clearSession()
 				if (result.status === 'expired') {
@@ -647,38 +642,149 @@ export function GameScreen({
 			}
 
 			const streakAfter =
-				result.unlocks.dailyStreakAfter ?? candidate.streakAfter
+				result.unlocks.dailyStreakAfter ?? ctx.candidate.streakAfter
 			setDailyCompletionSnapshot({
-				...candidate,
+				...ctx.candidate,
 				streakAfter,
 			})
 			setDailyCommitAccepted(true)
-			if (levelCompletedAnalyticsKey.current !== commitKey) {
-				levelCompletedAnalyticsKey.current = commitKey
+			if (levelCompletedAnalyticsKey.current !== ctx.commitKey) {
+				levelCompletedAnalyticsKey.current = ctx.commitKey
 				trackEvent('daily_completed', {
-					dateKey: candidate.dateKey,
-					stars: attemptStars,
-					difficulty: session.identity.profile,
-					usedHint: session.usedHint,
-					usedUndo: session.usedUndo,
+					dateKey: ctx.candidate.dateKey,
+					stars: ctx.candidate.attemptStars,
+					difficulty: ctx.profile,
+					usedHint: ctx.candidate.usedHint,
+					usedUndo: ctx.candidate.usedUndo,
 					streak: streakAfter,
 				})
 			}
 			if (result.unlocks.newUnlockIds.length > 0) {
 				pushAchievementToasts(result.unlocks.newUnlockIds)
 			}
+		},
+		[
+			clearSession,
+			clearSessionSource,
+			getAttemptId,
+			onHome,
+			pushAchievementToasts,
+		],
+	)
+
+	// One automatic Daily completion attempt per commit identity.
+	// write_failed must NOT clear completionCommitted (prevents effect loops).
+	useEffect(() => {
+		if (!session?.completed || !isDaily || !dailyDateKey) {
+			return
+		}
+		const commitKey = `daily:${dailyDateKey}:${session.identity.fingerprint}`
+		if (completionCommitted.current === commitKey) {
+			return
+		}
+		completionCommitted.current = commitKey
+		setDailyCommitAccepted(false)
+		setDailyCompletionSnapshot(null)
+		setDailyPersistError(null)
+		const owningAttemptId = getAttemptId()
+		const owningDateKey = dailyDateKey
+		const owningFingerprint = session.identity.fingerprint
+		const attemptStars = starsFromAttempt({
+			usedHint: session.usedHint,
+			usedUndo: session.usedUndo,
+		})
+		const candidate: DailyCompletionSnapshot = {
+			dateKey: dailyDateKey,
+			fingerprint: session.identity.fingerprint,
+			attemptStars,
+			usedHint: session.usedHint,
+			usedUndo: session.usedUndo,
+			streakAfter: getDailySummary(dailyDateKey).activeStreak,
+		}
+		const completedSession = session
+		void (async () => {
+			const result = await commitDailyCompletion(completedSession, {
+				attemptId: owningAttemptId,
+				dateKey: owningDateKey,
+				fingerprint: owningFingerprint,
+				getAttemptId,
+			})
+			applyDailyCompletionUiResult(result, {
+				owningAttemptId,
+				commitKey,
+				candidate,
+				profile: completedSession.identity.profile,
+			})
 		})()
 	}, [
-		clearSession,
-		clearSessionSource,
+		applyDailyCompletionUiResult,
 		commitDailyCompletion,
 		dailyDateKey,
 		getAttemptId,
 		getDailySummary,
-		getSessionSource,
 		isDaily,
-		onHome,
-		pushAchievementToasts,
+		session,
+	])
+
+	useEffect(() => {
+		return () => {
+			dailyRetryPendingRef.current = false
+		}
+	}, [])
+
+	const handleDailyCompletionRetry = useCallback(() => {
+		const err = dailyPersistError
+		const live = session
+		if (!err || !live?.completed) {
+			return
+		}
+		// Invalidate Retry when the runtime attempt was replaced.
+		if (getAttemptId() !== err.attemptId || attemptId !== err.attemptId) {
+			return
+		}
+		if (dailyRetryPendingRef.current || dailyRetryBusy) {
+			return
+		}
+		dailyRetryPendingRef.current = true
+		setDailyRetryBusy(true)
+		const candidate: DailyCompletionSnapshot = {
+			dateKey: err.dateKey,
+			fingerprint: err.fingerprint,
+			attemptStars: starsFromAttempt({
+				usedHint: live.usedHint,
+				usedUndo: live.usedUndo,
+			}),
+			usedHint: live.usedHint,
+			usedUndo: live.usedUndo,
+			streakAfter: getDailySummary(err.dateKey).activeStreak,
+		}
+		void (async () => {
+			try {
+				const result = await commitDailyCompletion(live, {
+					attemptId: err.attemptId,
+					dateKey: err.dateKey,
+					fingerprint: err.fingerprint,
+					getAttemptId,
+				})
+				applyDailyCompletionUiResult(result, {
+					owningAttemptId: err.attemptId,
+					commitKey: err.commitKey,
+					candidate,
+					profile: live.identity.profile,
+				})
+			} finally {
+				dailyRetryPendingRef.current = false
+				setDailyRetryBusy(false)
+			}
+		})()
+	}, [
+		attemptId,
+		dailyRetryBusy,
+		applyDailyCompletionUiResult,
+		commitDailyCompletion,
+		dailyPersistError,
+		getAttemptId,
+		getDailySummary,
 		session,
 	])
 
@@ -1429,6 +1535,50 @@ export function GameScreen({
 				{statusText}
 			</Text>
 
+			{dailyPersistError &&
+			getAttemptId() === dailyPersistError.attemptId &&
+			session.completed ? (
+				<View
+					style={[
+						styles.persistError,
+						{ backgroundColor: theme.colors.surface },
+					]}
+					testID="daily-completion-persist-error"
+				>
+					<Text style={[styles.persistErrorTitle, { color: theme.colors.text }]}>
+						{strings.dailySaveFailedTitle}
+					</Text>
+					<Text
+						style={[styles.persistErrorBody, { color: theme.colors.textMuted }]}
+					>
+						{strings.dailySaveFailedBody}
+					</Text>
+					<Pressable
+						onPress={handleDailyCompletionRetry}
+						disabled={dailyRetryBusy}
+						accessibilityRole="button"
+						testID="daily-completion-retry"
+						style={[
+							styles.persistErrorRetry,
+							{
+								backgroundColor: dailyRetryBusy
+									? theme.colors.controlDisabled
+									: theme.colors.controlPrimary,
+							},
+						]}
+					>
+						<Text
+							style={[
+								styles.persistErrorRetryLabel,
+								{ color: theme.colors.controlPrimaryText },
+							]}
+						>
+							{strings.dailySaveFailedRetry}
+						</Text>
+					</Pressable>
+				</View>
+			) : null}
+
 			{!session.completed ? (
 				<GameControls
 					canUndo={session.history.length > 0 && !helpAdBusy}
@@ -1554,6 +1704,33 @@ const styles = StyleSheet.create({
 		paddingHorizontal: spacing.md,
 		paddingVertical: spacing.xs,
 		minHeight: 22,
+	},
+	persistError: {
+		marginHorizontal: spacing.md,
+		marginBottom: spacing.sm,
+		padding: spacing.md,
+		borderRadius: 12,
+		gap: spacing.xs,
+	},
+	persistErrorTitle: {
+		...typography.subtitle,
+		textAlign: 'center',
+	},
+	persistErrorBody: {
+		...typography.caption,
+		textAlign: 'center',
+	},
+	persistErrorRetry: {
+		marginTop: spacing.xs,
+		alignSelf: 'center',
+		paddingHorizontal: spacing.lg,
+		paddingVertical: spacing.sm,
+		borderRadius: 10,
+	},
+	persistErrorRetryLabel: {
+		...typography.body,
+		fontWeight: '600',
+		textAlign: 'center',
 	},
 	devToggle: {
 		alignItems: 'center',

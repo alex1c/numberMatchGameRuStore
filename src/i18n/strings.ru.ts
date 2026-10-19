@@ -145,6 +145,10 @@ export const strings = {
 	dailyExpiredTitle: 'Головоломка дня обновилась',
 	dailyExpiredBody: 'Этот день уже закончился. Откройте сегодняшнюю головоломку.',
 	dailyExpiredOpenToday: 'Открыть сегодняшнюю',
+	dailySaveFailedTitle: 'Не удалось сохранить результат',
+	dailySaveFailedBody:
+		'Результат на экране сохранён локально. Нажмите «Повторить», чтобы записать прогресс.',
+	dailySaveFailedRetry: 'Повторить',
 	statisticsTitle: 'Статистика',
 	statsGroupCampaign: 'Кампания',
 	statsGroupGameplay: 'Игра',

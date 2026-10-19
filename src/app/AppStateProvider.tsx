@@ -634,22 +634,24 @@ export function AppStateProvider({
 						: 'rejected',
 				)
 
-				const stillOwnsRuntime =
+				// Ownership is attempt-scoped. The same completion may set
+				// sessionSource to `none` below — that is NOT stale. A replaced
+				// attemptId (Campaign / new Daily) is stale.
+				const stillOwnsAttempt =
 					dailyCompletionFlightRef.current === flight &&
-					sessionSourceRef.current === 'daily' &&
 					ownership.getAttemptId() === ownership.attemptId
 
-				if (!stillOwnsRuntime) {
-					// Persistence may have applied; Campaign (or another attempt)
-					// owns the live UI — do not clear/navigate/alert.
+				if (!stillOwnsAttempt) {
+					// Persistence may have applied; another attempt owns the UI.
 					return { status: 'stale_runtime' }
 				}
 
 				if (result.status === 'write_failed') {
-					// Preserve recoverable Daily attempt for a safe retry.
+					// Preserve recoverable Daily attempt for an explicit Retry.
 					return { status: 'write_failed' }
 				}
 				if (result.status === 'expired') {
+					// Intentional source clear for THIS attempt only.
 					setSessionSource('none')
 					return { status: 'expired' }
 				}
@@ -661,6 +663,8 @@ export function AppStateProvider({
 				// Lifetime counters are incremented during play via recordGameplayStats —
 				// do not re-add session totals here (would double-count).
 				const unlocks = evaluateAchievementUnlocks(repository.getRoot())
+				// Intentional source clear after durable accept — GameScreen must
+				// not treat this as stale_runtime (attemptId still matches).
 				setSessionSource('none')
 				return {
 					status: 'accepted',
