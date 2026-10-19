@@ -47,7 +47,8 @@ export interface SessionValidationResult {
 
 /**
  * Structured Daily completion outcome from the serialized mutation queue.
- * Expired / rejected must never award history, streak, or stars.
+ * Expired / rejected / write_failed must never award history, streak, or stars.
+ * `accepted` is returned only after a durable successful write.
  */
 export type DailyCompletionCommitResult =
 	| {
@@ -66,6 +67,12 @@ export type DailyCompletionCommitResult =
 			readonly status: 'rejected'
 			readonly root: PersistedRootV3
 			readonly reason: 'no_active' | 'identity_mismatch' | 'not_eligible'
+	  }
+	| {
+			readonly status: 'write_failed'
+			readonly root: PersistedRootV3
+			readonly reason: 'stale_write' | 'write_failed' | 'serialize_failed'
+			readonly message: string
 	  }
 
 /**
@@ -591,7 +598,8 @@ export class PersistRepository {
 	 * updater (not before enqueue) so a midnight rollover while waiting behind
 	 * another write cannot commit yesterday's Daily.
 	 *
-	 * Expired / rejected outcomes never write history, streak, or stars.
+	 * Identity mismatch never clears a newer activeDaily — only the exact
+	 * matching session may be expired/cleared. `accepted` requires durable write.
 	 */
 	async commitDailyCompletion(input: {
 		readonly dateKey: LocalDateKey
@@ -614,10 +622,12 @@ export class PersistRepository {
 		// Holder avoids TS control-flow narrowing issues for assignments inside
 		// the mutation callback.
 		const holder: {
-			decision: DailyCompletionCommitResult | null
+			decision:
+				| Exclude<DailyCompletionCommitResult, { status: 'write_failed' }>
+				| null
 		} = { decision: null }
 
-		const { root } = await this.update((current) => {
+		const { root, write } = await this.update((current) => {
 			// Clock is injectable via __setLocalNowForTests / currentLocalDateKey.
 			const todayKey = currentLocalDateKey()
 			const active = current.daily.activeDaily
@@ -631,17 +641,14 @@ export class PersistRepository {
 				return current
 			}
 
+			// Stale completion vs a newer Daily — leave the newer session intact.
 			if (active.dateKey !== input.dateKey) {
 				holder.decision = {
 					status: 'rejected',
 					root: current,
 					reason: 'identity_mismatch',
 				}
-				// Drop mismatched active so it cannot be completed later.
-				return {
-					...current,
-					daily: { ...current.daily, activeDaily: null },
-				}
+				return current
 			}
 
 			if (
@@ -653,10 +660,7 @@ export class PersistRepository {
 					root: current,
 					reason: 'identity_mismatch',
 				}
-				return {
-					...current,
-					daily: { ...current.daily, activeDaily: null },
-				}
+				return current
 			}
 
 			if (active.dateKey !== todayKey) {
@@ -666,7 +670,7 @@ export class PersistRepository {
 					attemptedDateKey: active.dateKey,
 					todayKey,
 				}
-				// Clear stale active without awarding completion.
+				// Exact matching session only — clear without awarding completion.
 				return {
 					...current,
 					daily: { ...current.daily, activeDaily: null },
@@ -696,11 +700,29 @@ export class PersistRepository {
 			}
 		}
 
-		// Attach the post-write root so callers see revision / cleared active.
+		// Tentative accept is only durable after a successful write.
+		if (decision.status === 'accepted' && !write.ok) {
+			return {
+				status: 'write_failed',
+				root,
+				reason: write.reason,
+				message: write.message,
+			}
+		}
+
 		if (decision.status === 'accepted') {
 			return { ...decision, root }
 		}
 		if (decision.status === 'expired') {
+			// Expire clear also requires durable write; otherwise preserve attempt.
+			if (!write.ok) {
+				return {
+					status: 'write_failed',
+					root,
+					reason: write.reason,
+					message: write.message,
+				}
+			}
 			return { ...decision, root }
 		}
 		return { ...decision, root }
