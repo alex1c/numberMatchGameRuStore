@@ -131,6 +131,7 @@ export function GameScreen({
 		recordGameplayStats,
 		discardStaleDailyIfDateChanged,
 		clearSessionSource,
+		getSessionSource,
 	} = useAppState()
 
 	const [dismissedCompletionKey, setDismissedCompletionKey] = useState<
@@ -573,6 +574,8 @@ export function GameScreen({
 
 	// Commit daily completion + analytics + achievement toasts.
 	// Snapshot / overlay become authoritative ONLY after commit accepts.
+	// Bound to originating attemptId + Daily source so a late settle cannot
+	// clear/navigate Campaign after the user switches away.
 	useEffect(() => {
 		if (!session?.completed || !isDaily || !dailyDateKey) {
 			return
@@ -584,6 +587,9 @@ export function GameScreen({
 		completionCommitted.current = commitKey
 		setDailyCommitAccepted(false)
 		setDailyCompletionSnapshot(null)
+		const owningAttemptId = getAttemptId()
+		const owningDateKey = dailyDateKey
+		const owningFingerprint = session.identity.fingerprint
 		const attemptStars = starsFromAttempt({
 			usedHint: session.usedHint,
 			usedUndo: session.usedUndo,
@@ -597,25 +603,51 @@ export function GameScreen({
 			streakAfter: getDailySummary(dailyDateKey).activeStreak,
 		}
 		void (async () => {
-			const unlocks = await commitDailyCompletion(session)
-			if (!unlocks) {
-				// Expired / rejected — no success overlay, no Restart of stale attempt.
+			const result = await commitDailyCompletion(session, {
+				attemptId: owningAttemptId,
+				dateKey: owningDateKey,
+				fingerprint: owningFingerprint,
+				getAttemptId,
+			})
+
+			const stillOwnsRuntime =
+				getAttemptId() === owningAttemptId &&
+				getSessionSource() === 'daily'
+
+			if (result.status === 'stale_runtime' || !stillOwnsRuntime) {
+				// Campaign (or another attempt) owns the live session — ignore UI.
+				return
+			}
+
+			if (result.status === 'write_failed') {
+				// Keep recoverable Daily attempt; allow a later retry.
+				completionCommitted.current = null
+				setDailyCommitAccepted(false)
+				setDailyCompletionSnapshot(null)
+				return
+			}
+
+			if (result.status === 'expired' || result.status === 'rejected') {
 				completionCommitted.current = null
 				setDailyCommitAccepted(false)
 				setDailyCompletionSnapshot(null)
 				clearSessionSource()
 				clearSession()
-				Alert.alert(strings.dailyExpiredTitle, strings.dailyExpiredBody, [
-					{
-						text: strings.dailyExpiredOpenToday,
-						onPress: () => {
-							onHome()
+				if (result.status === 'expired') {
+					Alert.alert(strings.dailyExpiredTitle, strings.dailyExpiredBody, [
+						{
+							text: strings.dailyExpiredOpenToday,
+							onPress: () => {
+								onHome()
+							},
 						},
-					},
-				])
+					])
+				}
 				return
 			}
-			const streakAfter = unlocks.dailyStreakAfter ?? candidate.streakAfter
+
+			const streakAfter =
+				result.unlocks.dailyStreakAfter ?? candidate.streakAfter
 			setDailyCompletionSnapshot({
 				...candidate,
 				streakAfter,
@@ -632,8 +664,8 @@ export function GameScreen({
 					streak: streakAfter,
 				})
 			}
-			if (unlocks.newUnlockIds.length > 0) {
-				pushAchievementToasts(unlocks.newUnlockIds)
+			if (result.unlocks.newUnlockIds.length > 0) {
+				pushAchievementToasts(result.unlocks.newUnlockIds)
 			}
 		})()
 	}, [
@@ -641,7 +673,9 @@ export function GameScreen({
 		clearSessionSource,
 		commitDailyCompletion,
 		dailyDateKey,
+		getAttemptId,
 		getDailySummary,
+		getSessionSource,
 		isDaily,
 		onHome,
 		pushAchievementToasts,

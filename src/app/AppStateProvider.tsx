@@ -97,6 +97,36 @@ export interface StartCampaignLevelResult {
 	readonly board?: BoardState
 }
 
+/**
+ * Runtime ownership for an in-flight Daily completion.
+ * attemptId is the GameSession generation — not puzzle fingerprint alone.
+ * getAttemptId must read the live runtime id after every await.
+ */
+export interface DailyCompletionOwnership {
+	readonly attemptId: number
+	readonly dateKey: LocalDateKey
+	readonly fingerprint: string
+	readonly getAttemptId: () => number
+}
+
+/**
+ * Separates persistence outcome from whether this callback may mutate runtime UI.
+ * `stale_runtime` means storage may have applied, but Campaign (or another
+ * attempt) now owns the live session — do not clear/navigate/alert.
+ */
+export type DailyCompletionUiResult =
+	| {
+			readonly status: 'accepted'
+			readonly unlocks: AchievementNotifyContext
+	  }
+	| { readonly status: 'expired' }
+	| {
+			readonly status: 'rejected'
+			readonly reason: 'no_active' | 'identity_mismatch' | 'not_eligible'
+	  }
+	| { readonly status: 'write_failed' }
+	| { readonly status: 'stale_runtime' }
+
 interface AppStateContextValue {
 	readonly hydrateStatus: HydrateStatus
 	/** Decided once after hydrate вЂ” never changes (avoids flicker races). */
@@ -131,14 +161,24 @@ interface AppStateContextValue {
 	) => Promise<PersistedRootV3 | null>
 	readonly startDailyPuzzle: () => Promise<StartDailyPuzzleResult>
 	readonly syncDailyFromGameplay: (session: GameSessionState) => Promise<void>
+	/**
+	 * Persist Daily completion. Pass the originating runtime attempt ownership
+	 * so a late settle cannot mutate Campaign UI after the user switches away.
+	 */
 	readonly commitDailyCompletion: (
 		session: GameSessionState,
-	) => Promise<AchievementNotifyContext | null>
+		ownership: DailyCompletionOwnership,
+	) => Promise<DailyCompletionUiResult>
 	/**
-	 * Last Daily commit outcome (accepted / expired / rejected).
+	 * Last Daily commit persistence outcome (not runtime UI ownership).
 	 * GameScreen gates the completion overlay on accepted only.
 	 */
-	readonly lastDailyCompletionStatus: 'accepted' | 'expired' | 'rejected' | null
+	readonly lastDailyCompletionStatus:
+		| 'accepted'
+		| 'expired'
+		| 'rejected'
+		| 'write_failed'
+		| null
 	readonly buildRestoredDailySession: () => GameSessionState | null
 	readonly getDailySummary: (todayKey: LocalDateKey) => DailySummary
 	readonly discardStaleDailyIfDateChanged: (
@@ -164,6 +204,8 @@ interface AppStateContextValue {
 	readonly markCampaignSession: () => void
 	readonly markDailySession: () => void
 	readonly clearSessionSource: () => void
+	/** Live session source (ref) — safe to read after awaits. */
+	readonly getSessionSource: () => SessionLaunchSource
 	/** Build GameSessionState from persisted activeSession (caller restores). */
 	readonly buildRestoredGameSession: () => GameSessionState | null
 }
@@ -188,13 +230,27 @@ export function AppStateProvider({
 	const [hydrateStatus, setHydrateStatus] = useState<HydrateStatus>('pending')
 	const [root, setRoot] = useState<PersistedRootV3>(createDefaultRoot)
 	const [initialRoute, setInitialRoute] = useState<AppRouteName>('home')
-	const [sessionSource, setSessionSource] =
+	const [sessionSource, setSessionSourceState] =
 		useState<SessionLaunchSource>('none')
 	const [achievementToastQueue, setAchievementToastQueue] = useState<
 		readonly string[]
 	>([])
 	const initialRouteLocked = useRef(false)
-	const completionInFlight = useRef(false)
+	/** Campaign progression/replay completion lock — independent of Daily. */
+	const campaignCompletionInFlight = useRef(false)
+	/**
+	 * Active Daily completion flight. Compared after await so a late settle
+	 * cannot mutate Campaign runtime UI.
+	 */
+	const dailyCompletionFlightRef = useRef<DailyCompletionOwnership | null>(
+		null,
+	)
+	/** Kept in sync synchronously — useEffect would lag behind await resumes. */
+	const sessionSourceRef = useRef<SessionLaunchSource>('none')
+	const setSessionSource = useCallback((next: SessionLaunchSource) => {
+		sessionSourceRef.current = next
+		setSessionSourceState(next)
+	}, [])
 
 	useEffect(() => {
 		let cancelled = false
@@ -239,7 +295,7 @@ export function AppStateProvider({
 		return () => {
 			cancelled = true
 		}
-	}, [repository])
+	}, [repository, setSessionSource])
 
 	// Re-evaluate local calendar on foreground — discard unfinished stale Daily.
 	useEffect(() => {
@@ -268,7 +324,7 @@ export function AppStateProvider({
 		return () => {
 			sub.remove()
 		}
-	}, [hydrateStatus, repository, sessionSource])
+	}, [hydrateStatus, repository, sessionSource, setSessionSource])
 
 	const completeTraining = useCallback(async () => {
 		const next = await repository.setTrainingCompleted(true)
@@ -332,7 +388,7 @@ export function AppStateProvider({
 				board: prepared.board,
 			}
 		},
-		[repository],
+		[repository, setSessionSource],
 	)
 
 	const commitProgressionCompletion = useCallback(
@@ -341,10 +397,10 @@ export function AppStateProvider({
 			session: GameSessionState,
 		): Promise<PersistedRootV3 | null> => {
 			// Guard double-tap / concurrent Next+complete races.
-			if (completionInFlight.current) {
+			if (campaignCompletionInFlight.current) {
 				return null
 			}
-			if (sessionSource !== 'campaign') {
+			if (sessionSourceRef.current !== 'campaign') {
 				return null
 			}
 			const active = repository.getRoot().activeSession
@@ -359,7 +415,7 @@ export function AppStateProvider({
 			) {
 				return repository.getRoot()
 			}
-			completionInFlight.current = true
+			campaignCompletionInFlight.current = true
 			try {
 				const next = await repository.commitProgressionCompletion({
 					level,
@@ -376,13 +432,13 @@ export function AppStateProvider({
 					initialBoard: session.initialBoard,
 					generationVersion: active.generationVersion,
 				})
-				setRoot(next)
+				setRoot(repository.getRoot())
 				return next
 			} finally {
-				completionInFlight.current = false
+				campaignCompletionInFlight.current = false
 			}
 		},
-		[repository, sessionSource],
+		[repository],
 	)
 
 	const commitReplayCompletion = useCallback(
@@ -390,10 +446,10 @@ export function AppStateProvider({
 			level: number,
 			session: GameSessionState,
 		): Promise<PersistedRootV3 | null> => {
-			if (completionInFlight.current) {
+			if (campaignCompletionInFlight.current) {
 				return null
 			}
-			if (sessionSource !== 'campaign') {
+			if (sessionSourceRef.current !== 'campaign') {
 				return null
 			}
 			const active = repository.getRoot().activeSession
@@ -403,7 +459,7 @@ export function AppStateProvider({
 			if (active.status === 'completed' && active.level === level) {
 				return repository.getRoot()
 			}
-			completionInFlight.current = true
+			campaignCompletionInFlight.current = true
 			try {
 				const next = await repository.commitReplayCompletion({
 					level,
@@ -420,13 +476,13 @@ export function AppStateProvider({
 					initialBoard: session.initialBoard,
 					generationVersion: active.generationVersion,
 				})
-				setRoot(next)
+				setRoot(repository.getRoot())
 				return next
 			} finally {
-				completionInFlight.current = false
+				campaignCompletionInFlight.current = false
 			}
 		},
-		[repository, sessionSource],
+		[repository],
 	)
 
 	const startDailyPuzzle = useCallback(async (): Promise<StartDailyPuzzleResult> => {
@@ -469,7 +525,7 @@ export function AppStateProvider({
 			}),
 			board: generated.board,
 		}
-	}, [repository])
+	}, [repository, setSessionSource])
 
 	const syncDailyFromGameplay = useCallback(
 		async (session: GameSessionState) => {
@@ -521,27 +577,37 @@ export function AppStateProvider({
 	)
 
 	const [lastDailyCompletionStatus, setLastDailyCompletionStatus] = useState<
-		'accepted' | 'expired' | 'rejected' | null
+		'accepted' | 'expired' | 'rejected' | 'write_failed' | null
 	>(null)
 
 	const commitDailyCompletion = useCallback(
 		async (
 			session: GameSessionState,
-		): Promise<AchievementNotifyContext | null> => {
-			if (completionInFlight.current || sessionSource !== 'daily') {
+			ownership: DailyCompletionOwnership,
+		): Promise<DailyCompletionUiResult> => {
+			if (sessionSourceRef.current !== 'daily') {
 				setLastDailyCompletionStatus('rejected')
-				return null
+				return {
+					status: 'rejected',
+					reason: 'not_eligible',
+				}
 			}
 			const active = repository.getRoot().daily.activeDaily
 			if (!active) {
 				setLastDailyCompletionStatus('rejected')
-				return null
+				return { status: 'rejected', reason: 'no_active' }
 			}
 			// Capture identity before enqueue — authoritative re-check is inside
 			// the repository mutation queue (handles midnight while waiting).
-			const attemptedDateKey = active.dateKey
-			const attemptedFingerprint = active.fingerprint
-			completionInFlight.current = true
+			const attemptedDateKey = ownership.dateKey
+			const attemptedFingerprint = ownership.fingerprint
+			const flight: DailyCompletionOwnership = {
+				attemptId: ownership.attemptId,
+				dateKey: attemptedDateKey,
+				fingerprint: attemptedFingerprint,
+				getAttemptId: ownership.getAttemptId,
+			}
+			dailyCompletionFlightRef.current = flight
 			try {
 				const stars = starsFromAttempt({
 					usedHint: session.usedHint,
@@ -557,28 +623,62 @@ export function AppStateProvider({
 					freeHintConsumed: session.freeHintConsumed,
 					freeUndoConsumed: session.freeUndoConsumed,
 				})
-				setRoot(result.root)
-				setLastDailyCompletionStatus(result.status)
-				if (result.status !== 'accepted') {
-					setSessionSource('none')
-					return null
+				// Always refresh from authoritative repo — never apply a stale
+				// result.root that could clobber later Campaign mutations.
+				setRoot(repository.getRoot())
+				setLastDailyCompletionStatus(
+					result.status === 'accepted' ||
+						result.status === 'expired' ||
+						result.status === 'write_failed'
+						? result.status
+						: 'rejected',
+				)
+
+				const stillOwnsRuntime =
+					dailyCompletionFlightRef.current === flight &&
+					sessionSourceRef.current === 'daily' &&
+					ownership.getAttemptId() === ownership.attemptId
+
+				if (!stillOwnsRuntime) {
+					// Persistence may have applied; Campaign (or another attempt)
+					// owns the live UI — do not clear/navigate/alert.
+					return { status: 'stale_runtime' }
 				}
+
+				if (result.status === 'write_failed') {
+					// Preserve recoverable Daily attempt for a safe retry.
+					return { status: 'write_failed' }
+				}
+				if (result.status === 'expired') {
+					setSessionSource('none')
+					return { status: 'expired' }
+				}
+				if (result.status === 'rejected') {
+					setSessionSource('none')
+					return { status: 'rejected', reason: result.reason }
+				}
+
 				// Lifetime counters are incremented during play via recordGameplayStats —
 				// do not re-add session totals here (would double-count).
-				const unlocks = evaluateAchievementUnlocks(result.root)
+				const unlocks = evaluateAchievementUnlocks(repository.getRoot())
 				setSessionSource('none')
 				return {
-					...unlocks,
-					dailyStreakAfter: getActiveCurrentStreak(
-						result.root.daily,
-						result.dateKey,
-					),
+					status: 'accepted',
+					unlocks: {
+						...unlocks,
+						dailyStreakAfter: getActiveCurrentStreak(
+							repository.getRoot().daily,
+							result.dateKey,
+						),
+					},
 				}
 			} finally {
-				completionInFlight.current = false
+				if (dailyCompletionFlightRef.current === flight) {
+					dailyCompletionFlightRef.current = null
+				}
 			}
 		},
-		[repository, sessionSource],
+		[repository, setSessionSource],
 	)
 
 	const buildRestoredDailySession = useCallback((): GameSessionState | null => {
@@ -626,7 +726,7 @@ export function AppStateProvider({
 				setSessionSource('none')
 			}
 		},
-		[repository, sessionSource],
+		[repository, sessionSource, setSessionSource],
 	)
 
 	const setThemePreference = useCallback(
@@ -672,7 +772,7 @@ export function AppStateProvider({
 		if (sessionSource === 'campaign') {
 			setSessionSource('none')
 		}
-	}, [repository, sessionSource])
+	}, [repository, sessionSource, setSessionSource])
 
 	const syncSessionFromGameplay = useCallback(
 		async (session: GameSessionState) => {
@@ -705,23 +805,28 @@ export function AppStateProvider({
 		const next = await repository.resetAll()
 		setRoot(next)
 		setSessionSource('none')
-	}, [repository])
+	}, [repository, setSessionSource])
 
 	const markDevFixtureSession = useCallback(() => {
 		setSessionSource('dev_fixture')
-	}, [])
+	}, [setSessionSource])
 
 	const markCampaignSession = useCallback(() => {
 		setSessionSource('campaign')
-	}, [])
+	}, [setSessionSource])
 
 	const markDailySession = useCallback(() => {
 		setSessionSource('daily')
-	}, [])
+	}, [setSessionSource])
 
 	const clearSessionSource = useCallback(() => {
 		setSessionSource('none')
-	}, [])
+	}, [setSessionSource])
+
+	const getSessionSource = useCallback(
+		(): SessionLaunchSource => sessionSourceRef.current,
+		[],
+	)
 
 	const buildRestoredGameSession = useCallback((): GameSessionState | null => {
 		const active = repository.isHydrated()
@@ -776,6 +881,7 @@ export function AppStateProvider({
 			markCampaignSession,
 			markDailySession,
 			clearSessionSource,
+			getSessionSource,
 			buildRestoredGameSession,
 		}),
 		[
@@ -808,6 +914,7 @@ export function AppStateProvider({
 			markCampaignSession,
 			markDailySession,
 			clearSessionSource,
+			getSessionSource,
 			buildRestoredGameSession,
 		],
 	)

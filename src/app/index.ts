@@ -13,6 +13,8 @@ export type {
 	StartCampaignLevelResult,
 	StartDailyPuzzleResult,
 	DailySummary,
+	DailyCompletionOwnership,
+	DailyCompletionUiResult,
 } from './AppStateProvider'
 
 export {
