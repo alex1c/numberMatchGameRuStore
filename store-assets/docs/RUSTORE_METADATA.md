@@ -1,7 +1,7 @@
 # RuStore metadata — Пары чисел — Number Match
 
 Package: `com.calculatorplatform.numbermatch`  
-Version: `1.0.0` (versionCode `1`)  
+Version: `1.0.1` (versionCode `2`)  
 Developer: ForestMusic
 
 ## Title
